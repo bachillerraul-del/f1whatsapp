@@ -1,0 +1,50 @@
+{
+  "name": "f1whatsapp",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot for Formula 1 news, standings, and race alerts",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@prisma/client": "^6.4.1",
+    "@whiskeysockets/baileys": "6.7.24",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3",
+    "pg": "^8.13.3",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.11.11",
+    "@types/qrcode-terminal": "^0.12.2",
+    "prisma": "^6.4.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "libsignal": "https://github.com/whiskeysockets/libsignal-node/tarball/master"
+  },
+  "keywords": [
+    "f1",
+    "formula1",
+    "whatsapp",
+    "bot",
+    "baileys",
+    "supabase",
+    "prisma"
+  ],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Subscriber {
+  id           String   @id @default(cuid())
+  jid          String   @unique // WhatsApp ID (phone@s.whatsapp.net o group@g.us)
+  name         String?
+  notifyRaces  Boolean  @default(true)
+  notifyQualy  Boolean  @default(true)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model SentAlert {
+  id         String   @id @default(cuid())
+  sessionKey String   @unique // e.g. "2026-season-monaco-race"
+  sentAt     DateTime @default(now())
+}
+
+model SessionFile {
+  id        String   @id // filename, e.g. "creds.json"
+  content   String   @db.Text
+  updatedAt DateTime @updatedAt
+}
