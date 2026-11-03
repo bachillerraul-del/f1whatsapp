@@ -1,0 +1,16 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Se ejecuta cada 12 minutos para evitar que Render se duerma a los 15 min
+    - cron: "*/12 * * * *"
+  workflow_dispatch: # Permite dispararlo manualmente si se desea
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping al bot de F1
+        run: |
+          echo "Pinging https://f1whatsapp.onrender.com/health..."
+          curl -s -f "https://f1whatsapp.onrender.com/health" || curl -s "https://f1whatsapp.onrender.com/"
