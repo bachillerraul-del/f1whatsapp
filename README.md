@@ -18,9 +18,11 @@ Bot inteligente de WhatsApp para fanáticos del automovilismo y motociclismo. Pr
 - 🏍️ **Mundial de Constructores (`!motogp constructores`):** Puntos acumulados por marca (Ducati, Aprilia, KTM, Yamaha, Honda).
 - 🏁 **Últimos Resultados (`!motogp ult`):** Top 10 del último Gran Premio disputado con tiempos y diferencias.
 
-### 🔔 Notificaciones y Administración
-- ⏰ **Alertas Automáticas (`!f1 suscribir` / `!f1 desuscribir`):** Avisos 30-60 minutos antes del inicio de carreras y clasificaciones tanto de F1 como de MotoGP.
-- 📲 **Visor Web de Código QR (`/qr`):** Página web interactiva en tu servidor para escanear el código QR fácilmente desde el navegador.
+### 🔔 Sistema de Alertas Automáticas (3 Avisos Clave)
+El bot envía **únicamente 3 alertas exclusivas** por cada fin de semana de Gran Premio:
+1. ⏰ **24 horas antes de la Práctica 1 (FP1):** Notificación de bienvenida al Gran Premio con el circuito y la lista completa de horarios del fin de semana (hora peninsular española).
+2. ⚡ **2 horas antes del Sprint:** Recordatorio de que la Carrera Sprint arranca en 2 horas (los fines de semana que haya sprint).
+3. 🏁 **2 horas antes de la Carrera:** Recordatorio final de que la Carrera Principal arranca en 2 horas.
 
 ---
 

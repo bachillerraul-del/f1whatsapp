@@ -32,6 +32,9 @@ import { pushSessionToDb } from "./session-sync.js";
 
 export let currentQr: string | null = null;
 export let isBotConnected: boolean = false;
+export let currentSock: WASocket | null = null;
+export let messagesCount: number = 0;
+export let lastMessageLog: string | null = null;
 
 const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -46,7 +49,7 @@ const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `🔹 *!motogp constructores* : Clasificación de marcas\n` +
   `🔹 *!motogp ult* : Resultados del último Gran Premio\n\n` +
   `🔔 *ALERTAS AUTOMÁTICAS:*\n` +
-  `🔹 *!f1 suscribir* : Recibir avisos antes de las sesiones\n` +
+  `🔹 *!f1 suscribir* : Recibir las 3 alertas clave de cada GP\n` +
   `🔹 *!f1 desuscribir* : Cancelar suscripción\n` +
   `🔹 *!f1 estado* : Ver estado de tu suscripción\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -91,6 +94,8 @@ export async function startBot() {
     printQRInTerminal: false,
     auth: state,
   });
+
+  currentSock = sock;
 
   sock.ev.on("creds.update", async () => {
     await saveCreds();
@@ -147,6 +152,9 @@ export async function startBot() {
 
       const rawText = extractText(msg);
       const cleanText = rawText.trim().toLowerCase();
+
+      messagesCount++;
+      lastMessageLog = `[${new Date().toISOString()}] fromMe=${msg.key.fromMe} text="${cleanText.slice(0, 50)}" from=${msg.key.remoteJid}`;
 
       // Only respond to supported prefixes
       const isF1 = cleanText.startsWith("!f1");
@@ -215,7 +223,7 @@ export async function startBot() {
           } else if (cleanText.includes("suscribir") || cleanText.includes("activar")) {
             await addSubscriber(remoteJid, pushName);
             await sock.sendMessage(remoteJid, {
-              text: `✅ ¡Te has suscrito exitosamente a las alertas automáticas de F1 y MotoGP, *${pushName}*! 🎉\n\nTe avisaremos antes de que comiencen las sesiones y carreras. Puedes cancelar en cualquier momento con *!f1 desuscribir*.`,
+              text: `✅ ¡Te has suscrito exitosamente a las alertas automáticas de F1 y MotoGP, *${pushName}*! 🎉\n\nRecibirás únicamente 3 alertas por Gran Premio:\n1️⃣ *24h antes de FP1* con todos los horarios del fin de semana\n2️⃣ *2h antes del Sprint*\n3️⃣ *2h antes de la Carrera Principal*\n\nPuedes cancelar en cualquier momento con *!f1 desuscribir*.`,
             });
           } else if (cleanText.includes("desuscribir") || cleanText.includes("cancelar")) {
             await removeSubscriber(remoteJid);

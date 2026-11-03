@@ -3,7 +3,14 @@ dotenv.config();
 
 import http from "http";
 import QRCode from "qrcode";
-import { startBot, currentQr, isBotConnected } from "./bot.js";
+import {
+  startBot,
+  currentQr,
+  isBotConnected,
+  currentSock,
+  messagesCount,
+  lastMessageLog,
+} from "./bot.js";
 import { prisma } from "./db.js";
 import { pullSessionFromDb, pushSessionToDb } from "./session-sync.js";
 
@@ -23,6 +30,23 @@ function startHealthServer() {
           uptime: process.uptime(),
           timestamp: new Date().toISOString(),
         })
+      );
+      return;
+    }
+
+    // Debug endpoint to diagnose WhatsApp status
+    if (req.url === "/debug") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          connected: isBotConnected,
+          user: currentSock?.user,
+          registered: (currentSock?.authState as any)?.creds?.registered,
+          messagesCount,
+          lastMessageLog,
+          uptime: process.uptime(),
+          timestamp: new Date().toISOString(),
+        }, null, 2)
       );
       return;
     }
