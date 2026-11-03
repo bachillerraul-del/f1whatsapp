@@ -2,19 +2,20 @@ import axios from "axios";
 
 const JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1";
 
-// Helper to format dates to local Spanish format
+// Helper to format dates explicitly to Spanish mainland time (Europe/Madrid)
 function formatDate(dateStr?: string, timeStr?: string): string {
   if (!dateStr) return "Por confirmar";
   try {
     const fullIso = timeStr ? `${dateStr}T${timeStr}` : `${dateStr}T12:00:00Z`;
     const date = new Date(fullIso);
     return date.toLocaleString("es-ES", {
+      timeZone: "Europe/Madrid",
       weekday: "short",
       day: "numeric",
       month: "short",
       hour: timeStr ? "2-digit" : undefined,
       minute: timeStr ? "2-digit" : undefined,
-      timeZoneName: timeStr ? "short" : undefined,
+      hour12: false,
     });
   } catch {
     return `${dateStr} ${timeStr || ""}`;
@@ -38,7 +39,7 @@ export async function getNextRace(): Promise<string> {
     msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `🏆 *${raceName}* (Ronda ${round}/${season})\n`;
     msg += `📍 ${circuitName} - ${locality}, ${country}\n\n`;
-    msg += `🗓️ *Horarios de Sesiones:*\n`;
+    msg += `🗓️ *Horarios de Sesiones (Hora España / Peninsular):*\n`;
 
     if (race.FirstPractice) {
       msg += `🔹 *Práctica 1:* ${formatDate(race.FirstPractice.date, race.FirstPractice.time)}\n`;
