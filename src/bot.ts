@@ -16,6 +16,12 @@ import {
   getLastRaceResults,
 } from "./f1.js";
 import {
+  getNextMotoGP,
+  getMotoGPStandings,
+  getMotoGPConstructors,
+  getLastMotoGPResults,
+} from "./motogp.js";
+import {
   addSubscriber,
   removeSubscriber,
   isSubscribed,
@@ -27,17 +33,33 @@ import { pushSessionToDb } from "./session-sync.js";
 export let currentQr: string | null = null;
 export let isBotConnected: boolean = false;
 
-const HELP_MESSAGE = `🏎️ *BOT DE FÓRMULA 1 - COMANDOS* 🏁\n` +
+const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
-  `🔹 *!f1 prox* : Ver próxima carrera y horarios de sesiones\n` +
-  `🔹 *!f1 pilotos* : Clasificación del campeonato de pilotos\n` +
-  `🔹 *!f1 constructores* : Clasificación del mundial de equipos\n` +
-  `🔹 *!f1 ult* : Resultados del último Gran Premio disputado\n` +
-  `🔹 *!f1 suscribir* : Recibir alertas automáticas antes de cada carrera/sesión\n` +
-  `🔹 *!f1 desuscribir* : Dejar de recibir notificaciones\n` +
-  `🔹 *!f1 estado* : Ver si estás suscrito a las alertas\n` +
+  `🏎️ *FÓRMULA 1:*\n` +
+  `🔹 *!f1 prox* : Próximo GP y horarios (hora España)\n` +
+  `🔹 *!f1 pilotos* : Clasificación del mundial\n` +
+  `🔹 *!f1 constructores* : Clasificación de escuderías\n` +
+  `🔹 *!f1 ult* : Resultados de la última carrera\n\n` +
+  `🏍️ *MOTOGP:*\n` +
+  `🔹 *!motogp prox* : Próximo GP y horarios (hora España)\n` +
+  `🔹 *!motogp pilotos* : Clasificación del mundial\n` +
+  `🔹 *!motogp constructores* : Clasificación de marcas\n` +
+  `🔹 *!motogp ult* : Resultados del último Gran Premio\n\n` +
+  `🔔 *ALERTAS AUTOMÁTICAS:*\n` +
+  `🔹 *!f1 suscribir* : Recibir avisos antes de las sesiones\n` +
+  `🔹 *!f1 desuscribir* : Cancelar suscripción\n` +
+  `🔹 *!f1 estado* : Ver estado de tu suscripción\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
-  `💡 _Envía cualquiera de estos comandos en el chat para obtener la información al instante._`;
+  `💡 _Envía cualquier comando en el chat para obtener la información._`;
+
+const MOTOGP_HELP_MESSAGE = `🏍️ *BOT DE MOTOGP - COMANDOS* 🏁\n` +
+  `━━━━━━━━━━━━━━━━━━━━━\n` +
+  `🔹 *!motogp prox* : Próximo GP y horarios oficiales (hora peninsular)\n` +
+  `🔹 *!motogp pilotos* : Clasificación del mundial de pilotos\n` +
+  `🔹 *!motogp constructores* : Clasificación de marcas y equipos\n` +
+  `🔹 *!motogp ult* : Resultados de la última carrera disputada\n` +
+  `━━━━━━━━━━━━━━━━━━━━━\n` +
+  `💡 _Escribe *!ayuda* para ver todos los deportes (F1 + MotoGP)._`;
 
 function extractText(msg: WAMessage): string {
   const m = msg.message;
@@ -106,16 +128,14 @@ export async function startBot() {
         } catch (e: any) {
           console.error("Error al limpiar sesión antigua:", e.message);
         }
-        // Restart to produce a new QR code automatically
         startBot();
       } else {
-        // Transient disconnect, reconnect automatically
         startBot();
       }
     } else if (connection === "open") {
       currentQr = null;
       isBotConnected = true;
-      console.log("\n🟢 ¡BOT DE F1 CONECTADO EXITOSAMENTE A WHATSAPP! 🏁🏎️\n");
+      console.log("\n🟢 ¡BOT DE F1 & MOTOGP CONECTADO EXITOSAMENTE A WHATSAPP! 🏁🏎️🏍️\n");
       await pushSessionToDb();
       setupAlerts(sock);
     }
@@ -128,57 +148,94 @@ export async function startBot() {
       const rawText = extractText(msg);
       const cleanText = rawText.trim().toLowerCase();
 
-      // Ignore messages that do not start with !f1
-      if (!cleanText.startsWith("!f1")) continue;
+      // Only respond to supported prefixes
+      const isF1 = cleanText.startsWith("!f1");
+      const isMotoGP = cleanText.startsWith("!motogp") || cleanText.startsWith("!moto") || cleanText.startsWith("!gp");
+      const isGeneralHelp = cleanText === "!ayuda" || cleanText === "!help" || cleanText === "!menu";
+
+      if (!isF1 && !isMotoGP && !isGeneralHelp) continue;
 
       const remoteJid = msg.key.remoteJid;
       if (!remoteJid) continue;
 
-      const pushName = msg.pushName || "Fan de F1";
+      const pushName = msg.pushName || "Fan del Motorsport";
       console.log(`📩 [Comando detectado] "${cleanText}" de ${pushName} (${remoteJid})`);
 
       try {
-        if (cleanText === "!f1" || cleanText === "!f1 ayuda" || cleanText === "!f1 help") {
-          await sock.sendMessage(remoteJid, { text: HELP_MESSAGE });
-        } else if (cleanText.includes("prox") || cleanText.includes("next")) {
-          await sock.sendPresenceUpdate("composing", remoteJid);
-          const response = await getNextRace();
-          await sock.sendMessage(remoteJid, { text: response });
-        } else if (cleanText.includes("piloto") || cleanText.includes("driver") || cleanText.includes("standing")) {
-          await sock.sendPresenceUpdate("composing", remoteJid);
-          const response = await getDriverStandings();
-          await sock.sendMessage(remoteJid, { text: response });
-        } else if (cleanText.includes("constructor") || cleanText.includes("equipo") || cleanText.includes("team")) {
-          await sock.sendPresenceUpdate("composing", remoteJid);
-          const response = await getConstructorStandings();
-          await sock.sendMessage(remoteJid, { text: response });
-        } else if (cleanText.includes("ult") || cleanText.includes("resultado") || cleanText.includes("result") || cleanText.includes("last")) {
-          await sock.sendPresenceUpdate("composing", remoteJid);
-          const response = await getLastRaceResults();
-          await sock.sendMessage(remoteJid, { text: response });
-        } else if (cleanText.includes("suscribir") || cleanText.includes("activar")) {
-          await addSubscriber(remoteJid, pushName);
-          await sock.sendMessage(remoteJid, {
-            text: `✅ ¡Te has suscrito exitosamente a las alertas de F1, *${pushName}*! 🎉\n\nTe avisaremos antes de que comiencen las sesiones y carreras. Puedes cancelar en cualquier momento con *!f1 desuscribir*.`,
-          });
-        } else if (cleanText.includes("desuscribir") || cleanText.includes("cancelar")) {
-          await removeSubscriber(remoteJid);
-          await sock.sendMessage(remoteJid, {
-            text: `ℹ️ Te has desuscrito de las alertas de F1. Ya no recibirás recordatorios automáticos. Escribe *!f1 suscribir* si cambias de opinión.`,
-          });
-        } else if (cleanText.includes("estado") || cleanText.includes("status")) {
-          const subscribed = await isSubscribed(remoteJid);
-          const statusText = subscribed
-            ? `🟢 *Activo*: Estás suscrito y recibirás alertas antes de cada sesión.`
-            : `🔴 *Inactivo*: No estás suscrito a las alertas automáticas. Escribe *!f1 suscribir* para activarlas.`;
-          await sock.sendMessage(remoteJid, { text: `📊 *Estado de tu suscripción:*\n${statusText}` });
-        } else {
-          await sock.sendMessage(remoteJid, {
-            text: `❓ Comando no reconocido.\n\nEscribe *!f1 ayuda* para ver los comandos válidos.`,
-          });
+        // GENERAL HELP
+        if (isGeneralHelp || cleanText === "!f1" || cleanText === "!f1 ayuda" || cleanText === "!f1 help") {
+          await sock.sendMessage(remoteJid, { text: GENERAL_HELP_MESSAGE });
+          continue;
+        }
+
+        // MOTOGP COMMANDS
+        if (isMotoGP) {
+          if (cleanText === "!motogp" || cleanText === "!motogp ayuda" || cleanText === "!motogp help" || cleanText === "!moto" || cleanText === "!gp") {
+            await sock.sendMessage(remoteJid, { text: MOTOGP_HELP_MESSAGE });
+          } else if (cleanText.includes("prox") || cleanText.includes("next") || cleanText.includes("horario")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getNextMotoGP();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("piloto") || cleanText.includes("driver") || cleanText.includes("standing") || cleanText.includes("rider")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getMotoGPStandings();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("constructor") || cleanText.includes("equipo") || cleanText.includes("team") || cleanText.includes("marca")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getMotoGPConstructors();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("ult") || cleanText.includes("resultado") || cleanText.includes("result") || cleanText.includes("last")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getLastMotoGPResults();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else {
+            await sock.sendMessage(remoteJid, { text: MOTOGP_HELP_MESSAGE });
+          }
+          continue;
+        }
+
+        // F1 COMMANDS
+        if (isF1) {
+          if (cleanText.includes("prox") || cleanText.includes("next") || cleanText.includes("horario")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getNextRace();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("piloto") || cleanText.includes("driver") || cleanText.includes("standing")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getDriverStandings();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("constructor") || cleanText.includes("equipo") || cleanText.includes("team")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getConstructorStandings();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("ult") || cleanText.includes("resultado") || cleanText.includes("result") || cleanText.includes("last")) {
+            await sock.sendPresenceUpdate("composing", remoteJid);
+            const response = await getLastRaceResults();
+            await sock.sendMessage(remoteJid, { text: response });
+          } else if (cleanText.includes("suscribir") || cleanText.includes("activar")) {
+            await addSubscriber(remoteJid, pushName);
+            await sock.sendMessage(remoteJid, {
+              text: `✅ ¡Te has suscrito exitosamente a las alertas automáticas de F1 y MotoGP, *${pushName}*! 🎉\n\nTe avisaremos antes de que comiencen las sesiones y carreras. Puedes cancelar en cualquier momento con *!f1 desuscribir*.`,
+            });
+          } else if (cleanText.includes("desuscribir") || cleanText.includes("cancelar")) {
+            await removeSubscriber(remoteJid);
+            await sock.sendMessage(remoteJid, {
+              text: `ℹ️ Te has desuscrito de las alertas. Ya no recibirás recordatorios automáticos. Escribe *!f1 suscribir* si cambias de opinión.`,
+            });
+          } else if (cleanText.includes("estado") || cleanText.includes("status")) {
+            const subscribed = await isSubscribed(remoteJid);
+            const statusText = subscribed
+              ? `🟢 *Activo*: Estás suscrito y recibirás alertas antes de cada carrera/sesión.`
+              : `🔴 *Inactivo*: No estás suscrito a las alertas automáticas. Escribe *!f1 suscribir* para activarlas.`;
+            await sock.sendMessage(remoteJid, { text: `📊 *Estado de tu suscripción:*\n${statusText}` });
+          } else {
+            await sock.sendMessage(remoteJid, {
+              text: `❓ Comando no reconocido.\n\nEscribe *!f1 ayuda* o *!motogp ayuda* para ver los comandos válidos.`,
+            });
+          }
         }
       } catch (err: any) {
-        console.error("❌ Error procesando comando F1:", err?.message);
+        console.error("❌ Error procesando comando:", err?.message);
         try {
           await sock.sendMessage(remoteJid, {
             text: `⚠️ Ocurrió un error al procesar tu solicitud. Por favor intenta de nuevo en unos momentos.`,

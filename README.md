@@ -1,66 +1,55 @@
-# 🏎️ F1 WhatsApp Bot 🏁
+# 🏎️ F1 & MotoGP WhatsApp Bot 🏁🏍️
 
-Bot inteligente de WhatsApp para fanáticos de la Fórmula 1. Proporciona en tiempo real el calendario de Grandes Premios, horarios de sesiones con conversión a tu hora local, clasificación de pilotos y constructores, resultados de la última carrera y sistema de alertas automáticas antes de cada sesión conectado a **Supabase PostgreSQL**.
+Bot inteligente de WhatsApp para fanáticos del automovilismo y motociclismo. Proporciona en tiempo real los calendarios de Grandes Premios, horarios de sesiones con conversión a tu hora local (España peninsular), clasificación de pilotos y constructores, resultados de la última carrera y sistema de alertas automáticas antes de cada sesión conectado a **Supabase PostgreSQL**.
 
 ---
 
 ## 🚀 Características
 
-- 📅 **Próxima Carrera (`!f1 prox`):** Nombre del GP, circuito, ciudad y horarios de todas las sesiones (Prácticas Libres 1, 2 y 3, Sprint Shootout, Carrera Sprint, Clasificación y Carrera Principal).
-- 🏆 **Mundial de Pilotos (`!f1 pilotos`):** Clasificación actualizada con puntos y victorias de cada piloto.
-- 🏎️ **Mundial de Constructores (`!f1 constructores`):** Puntuación y posiciones de todas las escuderías.
-- 🏁 **Últimos Resultados (`!f1 ult`):** Top 10 del GP más reciente con tiempos y puntos obtenidos.
-- 🔔 **Sistema de Alertas Automáticas (`!f1 suscribir` / `!f1 desuscribir`):** Avisos automáticos a los usuarios registrados 30-60 minutos antes del inicio de cada sesión mediante tareas programadas (cron).
-- 📊 **Panel de Base de Datos (`npm run prisma:studio`):** Administrador visual en el navegador para ver todos los suscriptores y alertas enviadas.
+### 🏎️ Fórmula 1
+- 📅 **Próxima Carrera (`!f1 prox`):** Horarios de todas las sesiones (FP1, FP2, FP3, Sprint, Clasificación y Carrera).
+- 🏆 **Mundial de Pilotos (`!f1 pilotos`):** Puntos, victorias y escuderías.
+- 🏎️ **Mundial de Constructores (`!f1 constructores`):** Clasificación de equipos.
+- 🏁 **Últimos Resultados (`!f1 ult`):** Top 10 del GP más reciente.
+
+### 🏍️ MotoGP
+- 📅 **Próximo Gran Premio (`!motogp prox`):** Fechas, circuito y horarios oficiales de FP1, Práctica (PR), FP2, Q1, Q2, Carrera Sprint, Warm Up y Carrera Principal en hora española.
+- 🏆 **Mundial de Pilotos (`!motogp pilotos`):** Puntuación de pilotos, victorias en carrera y sprints.
+- 🏍️ **Mundial de Constructores (`!motogp constructores`):** Puntos acumulados por marca (Ducati, Aprilia, KTM, Yamaha, Honda).
+- 🏁 **Últimos Resultados (`!motogp ult`):** Top 10 del último Gran Premio disputado con tiempos y diferencias.
+
+### 🔔 Notificaciones y Administración
+- ⏰ **Alertas Automáticas (`!f1 suscribir` / `!f1 desuscribir`):** Avisos 30-60 minutos antes del inicio de carreras y clasificaciones tanto de F1 como de MotoGP.
+- 📲 **Visor Web de Código QR (`/qr`):** Página web interactiva en tu servidor para escanear el código QR fácilmente desde el navegador.
+
+---
+
+## 📋 Comandos Disponibles
+
+| Comando | Deporte | Descripción |
+| :--- | :--- | :--- |
+| `!ayuda` | Todos | Menú general con todos los comandos de F1 y MotoGP |
+| `!f1 prox` | F1 | Horarios y circuito del próximo GP de Fórmula 1 |
+| `!f1 pilotos` | F1 | Clasificación del Mundial de Pilotos de F1 |
+| `!f1 constructores` | F1 | Clasificación de Escuderías de F1 |
+| `!f1 ult` | F1 | Resultados del último GP de F1 |
+| `!motogp prox` | MotoGP | Horarios y circuito del próximo GP de MotoGP |
+| `!motogp pilotos` | MotoGP | Clasificación del Mundial de Pilotos de MotoGP |
+| `!motogp constructores`| MotoGP | Clasificación de Constructores / Marcas de MotoGP |
+| `!motogp ult` | MotoGP | Resultados de la última carrera de MotoGP |
+| `!f1 suscribir` | Ambos | Activa las alertas automáticas para tu número o grupo |
+| `!f1 desuscribir` | Ambos | Cancela las alertas automáticas |
+| `!f1 estado` | Ambos | Consulta si estás activo en la lista de alertas |
 
 ---
 
 ## 🛠️ Tecnologías Utilizadas
 
 - **Runtime:** Node.js (TypeScript / ES Modules)
-- **WhatsApp Engine:** `@whiskeysockets/baileys` (conexión multi-dispositivo por código QR)
-- **Base de Datos:** PostgreSQL en **Supabase** (conectado mediante pooler IPv4)
+- **WhatsApp Engine:** `@whiskeysockets/baileys`
+- **Base de Datos:** PostgreSQL en **Supabase** (IPv4 pooler)
 - **ORM:** Prisma v6
-- **F1 Data API:** Jolpica F1 API (sucesor oficial y estable de Ergast)
+- **APIs de Datos:**
+  - F1: Jolpica F1 API (sucesor oficial de Ergast)
+  - MotoGP: Official MotoGP Pulselive API
 - **Scheduler:** `node-cron`
-
----
-
-## 📋 Comandos Disponibles en WhatsApp
-
-| Comando | Descripción |
-| :--- | :--- |
-| `!f1` o `!f1 ayuda` | Muestra el menú con todos los comandos disponibles |
-| `!f1 prox` | Horarios y circuito del próximo Gran Premio |
-| `!f1 pilotos` | Tabla del Campeonato Mundial de Pilotos |
-| `!f1 constructores` | Tabla del Campeonato Mundial de Constructores |
-| `!f1 ult` | Resultados del último Gran Premio disputado |
-| `!f1 suscribir` | Activa las alertas automáticas para tu número o grupo |
-| `!f1 desuscribir` | Cancela las alertas automáticas |
-| `!f1 estado` | Consulta si tu número está registrado y activo |
-
----
-
-## 🏁 Cómo Iniciar el Bot
-
-### 1. Iniciar en modo desarrollo:
-```bash
-npm run dev
-```
-
-### 2. Vincular con WhatsApp:
-1. Al ejecutar el comando, aparecerá un **Código QR** en la consola de la terminal.
-2. Abre WhatsApp en tu teléfono móvil.
-3. Ve a **Ajustes** (o menú de 3 puntos) > **Dispositivos vinculados** > **Vincular un dispositivo**.
-4. Escanea el código QR que se muestra en tu terminal.
-5. ¡Listo! Verás el mensaje: `🟢 ¡BOT DE F1 CONECTADO EXITOSAMENTE A WHATSAPP!`.
-
----
-
-## 🗄️ Ver Suscriptores en Supabase
-
-Puedes abrir la interfaz visual de Prisma Studio para ver los números suscritos en cualquier momento:
-```bash
-npm run prisma:studio
-```
-Se abrirá automáticamente en tu navegador en `http://localhost:5555`.
