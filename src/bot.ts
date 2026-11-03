@@ -1,3 +1,4 @@
+import fs from "fs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -18,9 +19,13 @@ import {
   addSubscriber,
   removeSubscriber,
   isSubscribed,
+  prisma,
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
 import { pushSessionToDb } from "./session-sync.js";
+
+export let currentQr: string | null = null;
+export let isBotConnected: boolean = false;
 
 const HELP_MESSAGE = `🏎️ *BOT DE FÓRMULA 1 - COMANDOS* 🏁\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -74,26 +79,44 @@ export async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      currentQr = qr;
+      isBotConnected = false;
       console.log("\n==========================================");
       console.log("📲 ESCANEA ESTE CÓDIGO QR CON WHATSAPP:");
       console.log("(Abre WhatsApp > Dispositivos vinculados > Vincular un dispositivo)");
+      console.log("O abre en el navegador: https://f1whatsapp.onrender.com/qr");
       console.log("==========================================\n");
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === "close") {
+      isBotConnected = false;
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-      console.log(`🔌 Conexión cerrada (Código: ${statusCode}). Reconectando: ${shouldReconnect}`);
-      if (shouldReconnect) {
+      console.log(`🔌 Conexión cerrada (Código: ${statusCode}). Desconectado permanente: ${isLoggedOut}`);
+
+      if (isLoggedOut) {
+        console.log("❌ Sesión cerrada por WhatsApp. Limpiando credenciales antiguas para generar nuevo QR...");
+        try {
+          await prisma.sessionFile.deleteMany();
+          if (fs.existsSync("auth_info_baileys")) {
+            fs.rmSync("auth_info_baileys", { recursive: true, force: true });
+          }
+        } catch (e: any) {
+          console.error("Error al limpiar sesión antigua:", e.message);
+        }
+        // Restart to produce a new QR code automatically
         startBot();
       } else {
-        console.log("❌ Sesión cerrada permanentemente. Elimina auth_info_baileys y escanea de nuevo.");
+        // Transient disconnect, reconnect automatically
+        startBot();
       }
     } else if (connection === "open") {
+      currentQr = null;
+      isBotConnected = true;
       console.log("\n🟢 ¡BOT DE F1 CONECTADO EXITOSAMENTE A WHATSAPP! 🏁🏎️\n");
-      console.log("👉 Prueba enviar *!f1* o *!f1 prox* en cualquier chat o en tu propio chat de WhatsApp.\n");
+      await pushSessionToDb();
       setupAlerts(sock);
     }
   });
@@ -112,7 +135,7 @@ export async function startBot() {
       if (!remoteJid) continue;
 
       const pushName = msg.pushName || "Fan de F1";
-      console.log(`📩 [Comando detectado] "${cleanText}" de ${pushName} (${remoteJid}) [fromMe=${msg.key.fromMe}]`);
+      console.log(`📩 [Comando detectado] "${cleanText}" de ${pushName} (${remoteJid})`);
 
       try {
         if (cleanText === "!f1" || cleanText === "!f1 ayuda" || cleanText === "!f1 help") {

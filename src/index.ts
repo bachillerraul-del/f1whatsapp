@@ -2,40 +2,137 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import http from "http";
-import { startBot } from "./bot.js";
+import QRCode from "qrcode";
+import { startBot, currentQr, isBotConnected } from "./bot.js";
 import { prisma } from "./db.js";
 import { pullSessionFromDb, pushSessionToDb } from "./session-sync.js";
 
 const PORT = process.env.PORT || 3000;
 
-// HTTP Health Check server for Cloud hosting (Render, Railway, Koyeb, etc.)
+// HTTP Health Check and Web QR viewer
 function startHealthServer() {
-  const server = http.createServer((req, res) => {
-    if (req.url === "/health" || req.url === "/") {
+  const server = http.createServer(async (req, res) => {
+    // Health Check endpoint
+    if (req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           status: "ok",
           service: "F1 WhatsApp Bot",
+          connected: isBotConnected,
           uptime: process.uptime(),
           timestamp: new Date().toISOString(),
         })
       );
-    } else {
-      res.writeHead(404);
-      res.end();
+      return;
     }
+
+    // QR Code visual web page
+    if (req.url === "/qr" || req.url === "/") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+
+      if (isBotConnected) {
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>F1 Bot WhatsApp - Conectado</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #fff; text-align: center; padding: 40px 20px; }
+              .card { background: #161b22; max-width: 480px; margin: 0 auto; padding: 30px; border-radius: 16px; border: 1px solid #30363d; }
+              .badge { display: inline-block; background: #238636; color: #fff; padding: 6px 14px; border-radius: 20px; font-weight: bold; margin-bottom: 20px; }
+              h1 { margin-bottom: 10px; }
+              p { color: #8b949e; line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">🟢 EN LÍNEA</div>
+              <h1>🏎️ Bot de F1 Conectado</h1>
+              <p>El bot está vinculado correctamente a WhatsApp y funcionando las 24 horas.</p>
+              <p>Envía <b>!f1</b> o <b>!f1 prox</b> en cualquier chat para interactuar con él.</p>
+            </div>
+          </body>
+          </html>
+        `);
+        return;
+      }
+
+      if (currentQr) {
+        try {
+          const qrDataUrl = await QRCode.toDataURL(currentQr, { width: 320, margin: 2 });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <meta http-equiv="refresh" content="7">
+              <title>Vincular WhatsApp - F1 Bot</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #fff; text-align: center; padding: 40px 20px; }
+                .card { background: #161b22; max-width: 480px; margin: 0 auto; padding: 30px; border-radius: 16px; border: 1px solid #30363d; }
+                img { border-radius: 12px; background: #fff; padding: 12px; margin: 20px 0; max-width: 100%; height: auto; }
+                .sub { color: #8b949e; font-size: 0.9rem; margin-top: 15px; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <h1>🏎️ Vincula tu WhatsApp</h1>
+                <p>1. Abre WhatsApp en tu teléfono.<br>2. Ve a <b>Dispositivos vinculados > Vincular un dispositivo</b>.<br>3. Escanea este código:</p>
+                <img src="${qrDataUrl}" alt="Código QR WhatsApp" />
+                <p class="sub">🔄 Esta página se actualiza automáticamente cada 7 segundos.</p>
+              </div>
+            </body>
+            </html>
+          `);
+          return;
+        } catch (e: any) {
+          console.error("Error generando QR data URL:", e.message);
+        }
+      }
+
+      // Waiting for QR or initializing
+      res.end(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="refresh" content="3">
+          <title>Iniciando F1 Bot...</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #fff; text-align: center; padding: 60px 20px; }
+            .card { background: #161b22; max-width: 480px; margin: 0 auto; padding: 30px; border-radius: 16px; border: 1px solid #30363d; }
+            p { color: #8b949e; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>⏳ Generando código QR...</h1>
+            <p>Espera unos segundos mientras el bot se conecta a los servidores de WhatsApp.</p>
+          </div>
+        </body>
+        </html>
+      `);
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
   });
 
   server.listen(PORT, () => {
-    console.log(`🌐 Servidor HTTP activo en el puerto ${PORT} (Health Check para la nube)`);
+    console.log(`🌐 Servidor HTTP activo en el puerto ${PORT} (Health Check & QR Dashboard)`);
   });
 }
 
 async function main() {
   console.log("🏎️ Iniciando Bot de WhatsApp para Fórmula 1...");
 
-  // Start health server for cloud environments
+  // Start health & QR web server
   startHealthServer();
 
   // Verify DB connection
