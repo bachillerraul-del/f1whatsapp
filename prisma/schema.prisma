@@ -29,3 +29,23 @@ model SessionFile {
   content   String   @db.Text
   updatedAt DateTime @updatedAt
 }
+
+model BlackjackBet {
+  id                String   @id @default(cuid())
+  groupJid          String
+  userJid           String
+  userName          String
+  season            Int
+  round             Int
+  spanishDriver     String   // "alonso" | "sainz"
+  partnerDriver     String   // driverId / key (e.g. "norris")
+  partnerDriverName String   // display name (e.g. "Lando Norris")
+  spanishTieBreaker Int      // predicted Spanish driver position (1-22)
+  changedPartner    Boolean  @default(false)
+  originalPartner   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([groupJid, season, round, userJid])
+  @@unique([groupJid, season, round, spanishDriver, partnerDriver])
+}
