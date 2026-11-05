@@ -3,8 +3,11 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   type WASocket,
   type WAMessage,
+  type CacheStore,
+  type proto,
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
@@ -28,7 +31,7 @@ import {
   prisma,
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
-import { pushSessionToDb } from "./session-sync.js";
+import { pushSessionToDb, schedulePushSessionToDb } from "./session-sync.js";
 import { handlePorraCommand } from "./porra.js";
 
 export let currentQr: string | null = null;
@@ -36,6 +39,38 @@ export let isBotConnected: boolean = false;
 export let currentSock: WASocket | null = null;
 export let messagesCount: number = 0;
 export let lastMessageLog: string | null = null;
+
+class SimpleCacheStore implements CacheStore {
+  private cache = new Map<string, any>();
+
+  get<T>(key: string): T | undefined {
+    return this.cache.get(key);
+  }
+  set<T>(key: string, value: T): void {
+    this.cache.set(key, value);
+    if (this.cache.size > 3000) {
+      const first = this.cache.keys().next().value;
+      if (first) this.cache.delete(first);
+    }
+  }
+  del(key: string): void {
+    this.cache.delete(key);
+  }
+  flushAll(): void {
+    this.cache.clear();
+  }
+}
+
+// In-memory cache de mensajes para responder a reintentos E2E (elimina "Esperando mensaje...")
+const messageStore = new Map<string, proto.IMessage>();
+
+export function saveMessageToStore(id: string, message: proto.IMessage) {
+  messageStore.set(id, message);
+  if (messageStore.size > 3000) {
+    const firstKey = messageStore.keys().next().value;
+    if (firstKey) messageStore.delete(firstKey);
+  }
+}
 
 const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -97,12 +132,41 @@ export async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
   const { version } = await fetchLatestBaileysVersion();
 
+  // Escuchar cuando Baileys guarda nuevas claves criptográficas para sincronizarlas con Supabase
+  const originalKeysSet = state.keys.set;
+  state.keys.set = async (data: any) => {
+    await originalKeysSet(data);
+    schedulePushSessionToDb(2500);
+  };
+
+  const msgRetryCache = new SimpleCacheStore();
+
   const sock: WASocket = makeWASocket({
     version,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-    auth: state,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
+    },
+    msgRetryCounterCache: msgRetryCache,
+    getMessage: async (key) => {
+      if (key.id && messageStore.has(key.id)) {
+        return messageStore.get(key.id);
+      }
+      return undefined;
+    },
   });
+
+  // Interceptar todos los envíos de mensajes para guardarlos en el almacén de reintentos
+  const rawSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = (async (...args: any[]) => {
+    const res = await (rawSendMessage as any)(...args);
+    if (res?.key?.id && res.message) {
+      saveMessageToStore(res.key.id, res.message);
+    }
+    return res;
+  }) as any;
 
   currentSock = sock;
 
@@ -152,11 +216,19 @@ export async function startBot() {
       console.log("\n🟢 ¡BOT DE F1 & MOTOGP CONECTADO EXITOSAMENTE A WHATSAPP! 🏁🏎️🏍️\n");
       await pushSessionToDb();
       setupAlerts(sock);
+
+      // Sincronizar periódicamente las claves cada 10 minutos
+      setInterval(async () => {
+        await pushSessionToDb();
+      }, 10 * 60 * 1000);
     }
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     for (const msg of messages) {
+      if (msg.key?.id && msg.message) {
+        saveMessageToStore(msg.key.id, msg.message);
+      }
       if (!msg.message) continue;
 
       const rawText = extractText(msg);

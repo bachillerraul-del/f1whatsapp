@@ -3,6 +3,9 @@ import path from "path";
 import { prisma } from "./db.js";
 
 const AUTH_DIR = path.resolve("auth_info_baileys");
+const contentCache = new Map<string, string>();
+let pushTimeout: NodeJS.Timeout | null = null;
+let isPushing = false;
 
 export async function pullSessionFromDb() {
   try {
@@ -20,11 +23,25 @@ export async function pullSessionFromDb() {
     for (const file of files) {
       const filePath = path.join(AUTH_DIR, file.id);
       fs.writeFileSync(filePath, file.content, "utf8");
+      contentCache.set(file.id, file.content);
     }
     console.log("✅ Sesión de WhatsApp restaurada exitosamente desde la nube.");
   } catch (err: any) {
     console.error("⚠️ Error restaurando sesión desde la base de datos:", err?.message);
   }
+}
+
+export function schedulePushSessionToDb(delayMs = 2500) {
+  if (pushTimeout) clearTimeout(pushTimeout);
+  pushTimeout = setTimeout(async () => {
+    if (isPushing) return;
+    isPushing = true;
+    try {
+      await pushSessionToDb();
+    } finally {
+      isPushing = false;
+    }
+  }, delayMs);
 }
 
 export async function pushSessionToDb() {
@@ -39,11 +56,18 @@ export async function pushSessionToDb() {
       if (!fs.statSync(filePath).isFile()) continue;
 
       const content = fs.readFileSync(filePath, "utf8");
+      // Evitar consultas innecesarias si el archivo no ha cambiado
+      if (contentCache.get(fileName) === content) {
+        continue;
+      }
+
       await prisma.sessionFile.upsert({
         where: { id: fileName },
         update: { content },
         create: { id: fileName, content },
       });
+
+      contentCache.set(fileName, content);
     }
   } catch (err: any) {
     console.error("⚠️ Error sincronizando sesión a Supabase:", err?.message);
