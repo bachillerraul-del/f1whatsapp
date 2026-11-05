@@ -40,6 +40,63 @@ interface AIPredictionResult {
 }
 
 /**
+ * Recopila telemetría real del fin de semana (Entrenamientos Libres y Mundial)
+ */
+async function fetchF1RealTimeTelemetry(): Promise<string> {
+  let context = "";
+
+  // 1. Clasificación oficial del Mundial de Pilotos (Jolpica)
+  try {
+    const sRes = await axios.get("https://api.jolpi.ca/ergast/f1/current/driverStandings.json", { timeout: 6000 });
+    const list = sRes.data?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings || [];
+    if (list.length > 0) {
+      const top8 = list.slice(0, 8).map((s: any) => `P${s.position}: ${s.Driver.familyName} (${s.Constructors[0]?.name}) ${s.points}pts`).join(", ");
+      const alo = list.find((s: any) => s.Driver.driverId === "alonso");
+      const sai = list.find((s: any) => s.Driver.driverId === "sainz");
+
+      context += `ESTADO REAL DEL MUNDIAL:\n` +
+        `- Equipos dominantes del Top 8: ${top8}\n` +
+        `- Fernando Alonso: P${alo?.position || 17} con ${alo?.Constructors[0]?.name || "Aston Martin"} (${alo?.points || 0} pts). Ritmo habitual en carrera: P11 a P16.\n` +
+        `- Carlos Sainz: P${sai?.position || 18} con ${sai?.Constructors[0]?.name || "Williams"} (${sai?.points || 0} pts). Ritmo habitual en carrera: P12 a P18.\n` +
+        `- Nota técnica: Mercedes, Ferrari, McLaren y Red Bull copan habitualmente las posiciones 1 a 6.\n`;
+    }
+  } catch (e: any) {
+    console.error("Error obteniendo clasificación para telemetría IA:", e?.message);
+  }
+
+  // 2. Tiempos y posiciones en Entrenamientos Libres (OpenF1)
+  try {
+    const sessRes = await axios.get("https://api.openf1.org/v1/sessions?meeting_key=latest", { timeout: 6000 });
+    const practices = (sessRes.data || []).filter((s: any) => s.session_name?.includes("Practice"));
+    if (practices.length > 0) {
+      const latestFP = practices[practices.length - 1];
+      const resultsRes = await axios.get(`https://api.openf1.org/v1/session_result?session_key=${latestFP.session_key}`, { timeout: 6000 });
+      const driversRes = await axios.get(`https://api.openf1.org/v1/drivers?session_key=${latestFP.session_key}`, { timeout: 6000 });
+      const driverMap = new Map((driversRes.data || []).map((d: any) => [d.driver_number, d]));
+
+      const sorted = (resultsRes.data || []).sort((a: any, b: any) => a.position - b.position);
+      if (sorted.length > 0) {
+        context += `\nTELEMETRÍA DE ENTRENAMIENTOS LIBRES (${latestFP.session_name} - ${latestFP.circuit_short_name || "Circuito"}):\n`;
+        const top6 = sorted.slice(0, 6).map((r: any) => {
+          const d: any = driverMap.get(r.driver_number);
+          return `P${r.position}: ${d?.broadcast_name || r.driver_number} (${d?.team_name || ""})`;
+        }).join(", ");
+        context += `- Top 6 en Libres: ${top6}\n`;
+
+        const alofp = sorted.find((r: any) => r.driver_number === 14);
+        const saifp = sorted.find((r: any) => r.driver_number === 55);
+        if (alofp) context += `- Alonso en Libres: P${alofp.position}\n`;
+        if (saifp) context += `- Sainz en Libres: P${saifp.position}\n`;
+      }
+    }
+  } catch (e: any) {
+    // OpenF1 no disponible o aún no hay libres disputados
+  }
+
+  return context;
+}
+
+/**
  * Consulta a Gemini AI para generar una predicción de Porra de F1
  */
 async function askGeminiForPrediction(
@@ -51,29 +108,34 @@ async function askGeminiForPrediction(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
+  const telemetry = await fetchF1RealTimeTelemetry();
   const driversList = KNOWN_DRIVERS.map((d) => d.id).join(", ");
   const existingSummaries = existingBets
     .map((b) => `${b.userName}: P4=${b.p4Driver}, P5=${b.p5Driver}, P6=${b.p6Driver}, Alo=${b.alonsoPos}, Sai=${b.sainzPos}`)
     .join(" | ");
 
-  const prompt = `Eres ${personality.name}, un ingeniero de F1 con el rol de "${personality.role}".
+  const prompt = `Eres ${personality.name}, un ingeniero y estratega de F1 con el rol de "${personality.role}".
 Tu estilo es: ${personality.style}.
-Estamos en la temporada ${season} de Fórmula 1, compitiendo en el "${raceName}".
+Estamos en la temporada ${season} de Fórmula 1, disputando el "${raceName}".
 
-Debes formular tu pronóstico para la porra del grupo de WhatsApp con estas reglas exactas:
-1. P4, P5 y P6: 3 pilotos diferentes de la parrilla que terminarán en esas posiciones. Pilotos válidos: [${driversList}].
-2. Posición final de Fernando Alonso: número del 1 al 22, o "DNF" si crees que no terminará la carrera.
-3. Posición final de Carlos Sainz: número del 1 al 22, o "DNF" si crees que no terminará la carrera.
-4. REGLA ANTI-COPIA: No puedes coincidir en más de 3 pronósticos con ninguna de las siguientes apuestas ya hechas: [${existingSummaries || "Ninguna aún"}].
+DATOS REALES DE TELEMETRÍA Y ENTRENAMIENTOS:
+${telemetry}
 
-Responde ÚNICAMENTE un objeto JSON válido con este formato exacto, sin markdown extra:
+INSTRUCCIONES CLAVE DE REALISMO:
+1. P4, P5 y P6: Debes elegir 3 pilotos distintos que razonablemente lucharán por esas posiciones según la telemetría y los libres (típicamente pilotos de Mercedes, Ferrari, McLaren o Red Bull como Russell, Leclerc, Hamilton, Norris, Piastri, etc.).
+2. Fernando Alonso (Aston Martin): asígnale un puesto acorde a su ritmo real en los libres y rendimiento de su coche (típicamente zona media P10-P16, salvo que apuestes DNF o veas ritmo sobresaliente).
+3. Carlos Sainz (Williams): asígnale un puesto acorde a su ritmo real en los libres y rendimiento de su coche (típicamente zona media P11-P18, o DNF).
+4. NO repitas al mismo piloto en dos posiciones del Top 6.
+5. REGLA ANTI-COPIA: No coincidas en más de 3 pronósticos con ninguna de las siguientes apuestas ya hechas: [${existingSummaries || "Ninguna aún"}].
+
+Responde ÚNICAMENTE un objeto JSON válido con este formato exacto, sin texto adicional:
 {
   "p4": "driver_id",
   "p5": "driver_id",
   "p6": "driver_id",
-  "alonso": "8",
-  "sainz": "5",
-  "comment": "Una frase corta con tu personalidad justificando tu jugada (máx 15 palabras)"
+  "alonso": "puesto_o_DNF",
+  "sainz": "puesto_o_DNF",
+  "comment": "Frase justificando tu pronóstico con telemetría/ritmo de libres (máx 15 palabras)"
 }`;
 
   for (const model of GEMINI_MODELS) {
@@ -83,7 +145,7 @@ Responde ÚNICAMENTE un objeto JSON válido con este formato exacto, sin markdow
         {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: personality.id.includes("pitwall") ? 0.9 : 0.4,
+            temperature: personality.id.includes("pitwall") ? 0.8 : 0.3,
             maxOutputTokens: 250,
             responseMimeType: "application/json",
           },
@@ -124,40 +186,37 @@ Responde ÚNICAMENTE un objeto JSON válido con este formato exacto, sin markdow
 }
 
 /**
- * Heurística deportiva inteligente en caso de no tener API Key de Gemini
+ * Heurística deportiva inteligente y realista en caso de no tener API Key de Gemini
  */
 function generateHeuristicPrediction(
   aiKey: "jarvis" | "pitwall",
   existingBets: any[]
 ): AIPredictionResult {
-  // Pool de pilotos favoritos para P4-P6
-  const topTier = ["norris", "leclerc", "piastri", "russell", "hamilton", "antonelli", "gasly", "albon", "bearman"];
-
   if (aiKey === "jarvis") {
-    // Jarvis: Más metódico
-    const p4 = findDriver("norris")!;
+    // Jarvis: Analítico, ritmo constante de los punteros
+    const p4 = findDriver("russell")!;
     const p5 = findDriver("leclerc")!;
-    const p6 = findDriver("piastri")!;
+    const p6 = findDriver("norris")!;
     return {
       p4,
       p5,
       p6,
-      alonsoPos: 8,
-      sainzPos: 6,
-      comment: "Simulación de 10.000 vueltas completada. Máxima probabilidad de acierto.",
+      alonsoPos: 13,
+      sainzPos: 15,
+      comment: "Simulación de telemetría: Mercedes, Ferrari y McLaren copan el Top 6; zona media para Aston y Williams.",
     };
   } else {
-    // Pitwall: Más agresivo
-    const p4 = findDriver("russell")!;
-    const p5 = findDriver("hamilton")!;
+    // Pitwall: Agresivo, busca oportunidades y arriesga con Williams
+    const p4 = findDriver("hamilton")!;
+    const p5 = findDriver("piastri")!;
     const p6 = findDriver("bearman")!;
     return {
       p4,
       p5,
       p6,
-      alonsoPos: 7,
+      alonsoPos: 11,
       sainzPos: 0, // DNF
-      comment: "Estrategia alternativa de neumáticos. Si sale el Safety Car, dominamos.",
+      comment: "Estrategia de undercut para Hamilton; alto riesgo de degradación y abandono para Williams.",
     };
   }
 }
@@ -203,13 +262,16 @@ export async function ensureAIParticipants(
       if (other.sainzPos === prediction.sainzPos) matches++;
 
       if (matches > 3) {
-        // Diferenciar cambiando un piloto o una posición
+        // Diferenciar cambiando un piloto o una posición manteniendo el máximo realismo
         if (prediction.p6.id === other.p6Driver) {
-          const alternative = findDriver(aiKey === "jarvis" ? "antonelli" : "colapinto");
+          const topCandidates = ["antonelli", "russell", "hamilton", "piastri", "leclerc", "norris", "verstappen"];
+          const altId = topCandidates.find((c) => c !== prediction.p4.id && c !== prediction.p5.id && c !== other.p6Driver);
+          const alternative = findDriver(altId || "antonelli");
           if (alternative) prediction.p6 = alternative;
         }
         if (prediction.sainzPos === other.sainzPos) {
-          prediction.sainzPos = prediction.sainzPos === 0 ? 5 : (prediction.sainzPos + 1) % 20 + 1;
+          // Williams en zona media (P12 a P18) o DNF
+          prediction.sainzPos = prediction.sainzPos === 0 ? 16 : (prediction.sainzPos >= 18 ? 13 : prediction.sainzPos + 1);
         }
       }
     }
