@@ -1,8 +1,10 @@
 import cron from "node-cron";
 import axios from "axios";
-import { getActiveSubscribers, wasAlertSent, markAlertSent } from "./db.js";
+import { getActiveSubscribers, wasAlertSent, markAlertSent, prisma } from "./db.js";
 import { getNextRace } from "./f1.js";
 import { getNextMotoGP } from "./motogp.js";
+import { calculatePorraResults } from "./porra.js";
+import { ensureAIParticipants } from "./ai-participants.js";
 import type { WASocket } from "@whiskeysockets/baileys";
 
 const JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1";
@@ -68,6 +70,43 @@ export function setupAlerts(sock: WASocket) {
                 `⏱️ Sesión: *Carrera Sprint*\n` +
                 `📍 Circuito: ${race.Circuit?.circuitName || ""}\n\n` +
                 `¡Prepárate, los semáforos se apagan en 2 horas! 🏁⚡`;
+              await broadcastAlert(sock, message);
+              await markAlertSent(alertKey);
+            }
+          }
+        }
+
+        // --- RECORDATORIO PORRA: 2 horas antes de la Clasificación (Qualy Q1) ---
+        if (race.Qualifying?.date) {
+          const qualyTime = race.Qualifying.time || "14:00:00Z";
+          const qualyDate = new Date(`${race.Qualifying.date}T${qualyTime}`);
+          const diffMinutes = Math.round((qualyDate.getTime() - now.getTime()) / (1000 * 60));
+
+          // Ventana de 2 horas (entre 1h45m y 2h15m)
+          if (diffMinutes >= 105 && diffMinutes <= 135) {
+            const alertKey = `f1-${race.season}-${race.round}-2h-qualy-porra`;
+            if (!(await wasAlertSent(alertKey))) {
+              console.log(`🚀 [Alerta Porra F1] 2h antes de la Qualy para ${race.raceName}`);
+
+              // Asegurar que las IAs participen en cada grupo
+              const subscribers = await getActiveSubscribers();
+              for (const sub of subscribers) {
+                try {
+                  await ensureAIParticipants(sub.jid, parseInt(race.season, 10), parseInt(race.round, 10), race.raceName);
+                } catch (e: any) {
+                  // omit
+                }
+              }
+
+              const message = `⏰ *¡ALERTA PORRA F1: QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS!* 🚨\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `🏎️ *${race.raceName}*\n` +
+                `⏱️ La Clasificación (Qualy) comienza en 2 horas.\n\n` +
+                `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus estrategias con Gemini.\n` +
+                `👉 ¡Última oportunidad para enviar o modificar tu pronóstico!\n` +
+                `Usa: *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n` +
+                `_Ejemplo: !porra norris leclerc piastri P8 P5 (o DNF si crees que abandonan)_\n\n` +
+                `📊 Consulta todas las apuestas (incluyendo a las IAs) con *!porra ver*. ¡Que no se te pase! 🏁`;
               await broadcastAlert(sock, message);
               await markAlertSent(alertKey);
             }
@@ -205,7 +244,67 @@ export function setupAlerts(sock: WASocket) {
     } catch (err: any) {
       console.error("[Cron MotoGP Error]:", err?.message);
     }
+
+    // =========================================================
+    // 🏆 3. PUBLICACIÓN AUTOMÁTICA DE RESULTADOS DE LA PORRA
+    // =========================================================
+    try {
+      const lastRes = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 8000 });
+      const lastRace = lastRes.data.MRData?.RaceTable?.Races?.[0];
+
+      if (lastRace && lastRace.Results && lastRace.Results.length >= 6) {
+        const season = parseInt(lastRace.season, 10);
+        const round = parseInt(lastRace.round, 10);
+        const alertKey = `f1-${season}-${round}-auto-porra-results`;
+
+        if (!(await wasAlertSent(alertKey))) {
+          // Comprobar que la carrera finalizó recientemente (dentro de las últimas 72 horas)
+          const raceDate = new Date(`${lastRace.date}T${lastRace.time || "14:00:00Z"}`);
+          const hoursSinceRace = (now.getTime() - raceDate.getTime()) / (1000 * 60 * 60);
+
+          if (hoursSinceRace >= 0 && hoursSinceRace <= 72) {
+            // Buscar todos los grupos que tengan apuestas registradas para este GP
+            const distinctGroups = await prisma.porraBet.findMany({
+              where: {
+                season,
+                round,
+              },
+              select: { groupJid: true },
+              distinct: ["groupJid"],
+            });
+
+            if (distinctGroups.length > 0) {
+              console.log(`🏆 [Auto-Resultados Porra] Enviando resultados a ${distinctGroups.length} grupo(s) para ${lastRace.raceName}`);
+              for (const g of distinctGroups) {
+                try {
+                  const res = await calculatePorraResults(g.groupJid);
+                  const captionText = `📢 *¡RESULTADOS OFICIALES Y PODIO DE LA PORRA TRAS LA CARRERA!* 🏁\n\n` + res.text;
+                  if (res.imageBuffer) {
+                    await sock.sendMessage(g.groupJid, {
+                      image: res.imageBuffer,
+                      caption: captionText,
+                    });
+                  } else {
+                    await sock.sendMessage(g.groupJid, {
+                      text: captionText,
+                    });
+                  }
+                } catch (e: any) {
+                  console.error(`Error enviando resultados de porra a ${g.groupJid}:`, e?.message);
+                }
+              }
+            }
+            await markAlertSent(alertKey);
+          } else if (hoursSinceRace > 72) {
+            // Carrera antigua, marcar para no reevaluar
+            await markAlertSent(alertKey);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[Cron Auto-Resultados Porra Error]:", err?.message);
+    }
   });
 
-  console.log("✅ Sistema configurado: Únicamente 3 alertas (24h antes FP1, 2h antes Sprint, 2h antes Carrera).");
+  console.log("✅ Sistema de alertas y porra automática configurado.");
 }

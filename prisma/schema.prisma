@@ -30,22 +30,26 @@ model SessionFile {
   updatedAt DateTime @updatedAt
 }
 
-model BlackjackBet {
-  id                String   @id @default(cuid())
-  groupJid          String
-  userJid           String
-  userName          String
-  season            Int
-  round             Int
-  spanishDriver     String   // "alonso" | "sainz"
-  partnerDriver     String   // driverId / key (e.g. "norris")
-  partnerDriverName String   // display name (e.g. "Lando Norris")
-  spanishTieBreaker Int      // predicted Spanish driver position (1-22)
-  changedPartner    Boolean  @default(false)
-  originalPartner   String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+model PorraBet {
+  id        String   @id @default(cuid())
+  groupJid  String
+  userJid   String
+  userName  String
+  season    Int
+  round     Int
+  raceName  String?
+  p4Driver  String   // driverId (e.g. "norris")
+  p4Name    String   // display name (e.g. "Lando Norris")
+  p5Driver  String   // driverId (e.g. "leclerc")
+  p5Name    String   // display name (e.g. "Charles Leclerc")
+  p6Driver  String   // driverId (e.g. "piastri")
+  p6Name    String   // display name (e.g. "Oscar Piastri")
+  alonsoPos Int      // predicted finish position (1-22)
+  sainzPos  Int      // predicted finish position (1-22)
+  points    Int?     // total points won in this GP (null if pending)
+  breakdown String?  // points explanation
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([groupJid, season, round, userJid])
-  @@unique([groupJid, season, round, spanishDriver, partnerDriver])
 }

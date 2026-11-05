@@ -29,7 +29,7 @@ import {
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
 import { pushSessionToDb } from "./session-sync.js";
-import { handleBlackjackCommand } from "./blackjack.js";
+import { handlePorraCommand } from "./porra.js";
 
 export let currentQr: string | null = null;
 export let isBotConnected: boolean = false;
@@ -44,12 +44,12 @@ const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `🔹 *!f1 pilotos* : Clasificación del mundial\n` +
   `🔹 *!f1 constructores* : Clasificación de escuderías\n` +
   `🔹 *!f1 ult* : Resultados de la última carrera\n\n` +
-  `🃏 *F1 BLACKJACK 21 (JUEGO):*\n` +
-  `🔹 *!21 [español] [socio] [Puesto]* : Jugar mano (ej: !21 alonso norris P9)\n` +
-  `🔹 *!21 cambiar [socio]* : Cambio del sábado (+1 penalización)\n` +
-  `🔹 *!21 manos* : Ver apuestas del grupo\n` +
-  `🔹 *!21 resultados* : Calcular ganador del GP\n` +
-  `🔹 *!21 reglas* : Normas y puntuación detallada\n\n` +
+  `🏆 *LA PORRA DE F1 (JUEGO):*\n` +
+  `🔹 *!porra [P4] [P5] [P6] [Alonso] [Sainz]* : Enviar pronóstico (ej: !porra norris leclerc piastri P8 P5)\n` +
+  `🔹 *!porra ver* : Ver las apuestas del grupo\n` +
+  `🔹 *!porra resultados* : Calcular puntos y podio del GP\n` +
+  `🔹 *!porra tabla* : Clasificación general de la temporada\n` +
+  `🔹 *!porra reglas* : Sistema de puntos y normas\n\n` +
   `🏍️ *MOTOGP:*\n` +
   `🔹 *!motogp prox* : Próximo GP y horarios (hora España)\n` +
   `🔹 *!motogp pilotos* : Clasificación del mundial\n` +
@@ -166,10 +166,10 @@ export async function startBot() {
       // Only respond to supported prefixes
       const isF1 = cleanText.startsWith("!f1");
       const isMotoGP = cleanText.startsWith("!motogp") || cleanText.startsWith("!moto") || cleanText.startsWith("!gp");
-      const isBlackjack = cleanText.startsWith("!21") || cleanText.startsWith("!blackjack");
+      const isPorra = cleanText.startsWith("!porra");
       const isGeneralHelp = cleanText === "!ayuda" || cleanText === "!help" || cleanText === "!menu";
 
-      if (!isF1 && !isMotoGP && !isBlackjack && !isGeneralHelp) continue;
+      if (!isF1 && !isMotoGP && !isPorra && !isGeneralHelp) continue;
 
       const remoteJid = msg.key.remoteJid;
       if (!remoteJid) continue;
@@ -184,12 +184,36 @@ export async function startBot() {
           continue;
         }
 
-        // F1 BLACKJACK 21 COMMANDS
-        if (isBlackjack) {
+        // LA PORRA DE F1 COMMANDS
+        if (isPorra) {
           await sock.sendPresenceUpdate("composing", remoteJid);
           const senderJid = msg.key.participant || remoteJid;
-          const response = await handleBlackjackCommand(remoteJid, senderJid, pushName, rawText);
-          await sock.sendMessage(remoteJid, { text: response });
+          const response = await handlePorraCommand(remoteJid, senderJid, pushName, rawText);
+
+          if (typeof response === "string") {
+            await sock.sendMessage(remoteJid, { text: response });
+
+            // Reacción automática con emoji al registrar pronóstico
+            if (response.includes("¡PRONÓSTICO REGISTRADO!")) {
+              try {
+                await sock.sendMessage(remoteJid, {
+                  react: { text: "🏎️", key: msg.key },
+                });
+              } catch (e: any) {
+                console.error("Error enviando reacción de emoji:", e?.message);
+              }
+            }
+          } else {
+            // Objeto con imagen y texto de resultados
+            if (response.imageBuffer) {
+              await sock.sendMessage(remoteJid, {
+                image: response.imageBuffer,
+                caption: response.text,
+              });
+            } else {
+              await sock.sendMessage(remoteJid, { text: response.text });
+            }
+          }
           continue;
         }
 

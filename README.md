@@ -18,20 +18,35 @@ Bot inteligente de WhatsApp para fanáticos del automovilismo y motociclismo. Pr
 - 🏍️ **Mundial de Constructores (`!motogp constructores`):** Puntos acumulados por marca (Ducati, Aprilia, KTM, Yamaha, Honda).
 - 🏁 **Últimos Resultados (`!motogp ult`):** Top 10 del último Gran Premio disputado con tiempos y diferencias.
 
-### 🃏 Juego: F1 Blackjack 21 (Edición 1 GP)
-Juego interactivo para grupos de WhatsApp donde cada participante elige una mano de dos pilotos.
-- 🎯 **Objetivo:** Lograr que la suma de las posiciones finales de tus 2 pilotos el domingo sea exactamente **21** (o lo más cercano por debajo sin pasarse).
-- 📋 **Composición de la mano:**
-  1. **Piloto Español obligatorio:** Alonso o Sainz.
-  2. **Socio extranjero:** Cualquier otro piloto de la parrilla.
-  3. **Criterio de desempate:** Predicción de en qué puesto terminará tu piloto español (P1 - P22).
-  - *(No se permite repetir la misma pareja idéntica de pilotos dentro del mismo grupo).*
-- ⏳ **Límite de apuestas iniciales:** Se cierran automáticamente cuando comienza la Clasificación (Q1) del sábado.
-- 🔄 **La jugada del sábado (Post-Qualy):** Desde que termina la Qualy hasta 1 hora antes de la carrera, puedes cambiar a tu socio extranjero asumiendo una penalización de **+1 posición** a tu suma final.
-- 💥 **Eliminados ("Bust"):** Si la suma de posiciones es $\ge 22$, quedas eliminado (a menos que todos se pasen, donde gana quien se haya pasado por menos).
-- ⚖️ **Desempates:**
-  1. Mayor precisión al acertar el puesto real de tu piloto español.
-  2. Timestamp: Quien haya registrado su apuesta antes.
+### 🏆 Juego: La Porra de F1 (P4, P5, P6, Alonso y Sainz)
+Juego interactivo para grupos de WhatsApp donde cada participante pronostica el Top 4-5-6 y las posiciones de los pilotos españoles.
+- 🎯 **Objetivo:** Acertar qué pilotos terminarán en **P4, P5 y P6**, y la posición final de **Fernando Alonso** y **Carlos Sainz**.
+- 📋 **Composición del pronóstico:**
+  1. **P4, P5, P6:** 3 pilotos distintos del resto de la parrilla (¡Alonso y Sainz también pueden incluirse aquí!).
+  2. **Posición de Fernando Alonso:** Número entre 1 y 22, o **`DNF`** si crees que abandonará.
+  3. **Posición de Carlos Sainz:** Número entre 1 y 22, o **`DNF`** si crees que abandonará.
+  - _Ejemplos:_ `!porra norris leclerc piastri P8 P5` o `!porra russell hamilton bearman DNF P7`
+- 🏆 **Sistema de Puntuación (Hasta 15 pts por GP):**
+  - **P4, P5 y P6:** **+3 puntos** por cada acierto exacto de piloto en su posición.
+  - **Fernando Alonso y Carlos Sainz:**
+    - **+3 puntos:** Acierto exacto de la posición o acierto de **`DNF`** si el piloto no acaba la carrera.
+    - **+2 puntos:** Si fallas por solo 1 puesto de diferencia (ej: predijiste P8 y acaba P7 o P9).
+    - **+1 punto:** Si fallas por 2 puestos de diferencia (ej: predijiste P8 y acaba P6 o P10).
+    - **0 puntos:** Si la diferencia es de 3 o más puestos (o si pusiste DNF y terminó).
+- ⏳ **Límite de apuestas:** Se cierran automáticamente al comenzar la **Clasificación (Q1)** del sábado.
+- ⏰ **Aviso automático de cierre:** El bot avisa 2 horas antes de la Qualy para que nadie se quede sin enviar su porra.
+- 🤖 **Competidores IA (Jarvis AI & Pitwall AI):** Dos inteligencias artificiales que juegan en la porra del grupo formulando estrategias con **Google Gemini AI**:
+  - **🤖 Jarvis AI:** Estratega analítico de telemetría (cálculo de probabilidades y ritmo constante).
+  - **🤖 Pitwall AI:** Jefe de muro audaz (apuestas arriesgadas, sorpresas en el Top 6 y DNF).
+- 🖼️ **Tarjeta gráfica del Podio:** Al publicarse los resultados de la carrera, el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones.
+- 📢 **Publicación automática de resultados:** Nada más finalizar la carrera el domingo, el bot calcula los puntos y publica automáticamente el podio y desglose en cada grupo.
+- 🏎️ **Feedback visual:** El bot reacciona con el emoji 🏎️ al mensaje de WhatsApp cuando registras un pronóstico válido.
+- 🚫 **Regla anti-copia:** Un participante no puede copiar más de 3 pronósticos de otro jugador dentro del mismo grupo (máximo 3 coincidencias de 5). Si coincide en 4 o 5, la apuesta es rechazada automáticamente indicando qué predicciones coinciden.
+- 🎖️ **Palmarés y Cuadro de Honor (`!porra tabla`):** La clasificación general ahora incluye estadísticas avanzadas:
+  - 🏆 **Victorias de GP:** Carreras ganadas por cada participante.
+  - 🎯 **El Nostradamus:** Total de aciertos exactos (+3) a lo largo del año.
+  - 🇪🇸 **Especialista Español:** Puntos totales sumados gracias a Alonso y Sainz.
+  - 👑 **Cuadro de Honor:** Premios y títulos honoríficos para los mejores de la temporada.
 
 ### 🔔 Sistema de Alertas Automáticas (3 Avisos Clave)
 El bot envía **únicamente 3 alertas exclusivas** por cada fin de semana de Gran Premio:
@@ -43,25 +58,26 @@ El bot envía **únicamente 3 alertas exclusivas** por cada fin de semana de Gra
 
 ## 📋 Comandos Disponibles
 
-| Comando | Deporte | Descripción |
+| Comando | Deporte / Función | Descripción |
 | :--- | :--- | :--- |
 | `!ayuda` | Todos | Menú general con todos los comandos de F1 y MotoGP |
 | `!f1 prox` | F1 | Horarios y circuito del próximo GP de Fórmula 1 |
 | `!f1 pilotos` | F1 | Clasificación del Mundial de Pilotos de F1 |
 | `!f1 constructores` | F1 | Clasificación de Escuderías de F1 |
 | `!f1 ult` | F1 | Resultados del último GP de F1 |
-| `!21 [español] [socio] [Puesto]` | Juego 21 | Registra tu apuesta (ej. `!21 alonso norris P9`) |
-| `!21 cambiar [nuevo_socio]` | Juego 21 | Cambio de socio post-qualy (+1 de penalización) |
-| `!21 manos` | Juego 21 | Ver la mesa con las cartas y manos de todo el grupo |
-| `!21 resultados` | Juego 21 | Calcula automáticamente el podio y ganador del GP |
-| `!21 reglas` | Juego 21 | Explica las reglas y funcionamiento del juego |
+| `!porra [P4] [P5] [P6] [Alo] [Sai]` | Porra F1 | Envía o modifica tu pronóstico (ej. `!porra norris leclerc piastri P8 P5`) |
+| `!porra ver` | Porra F1 | Ver los pronósticos registrados en el grupo para el próximo GP |
+| `!porra ia` | Porra F1 | Desafiar / ver los pronósticos de Jarvis AI y Pitwall AI con Gemini |
+| `!porra resultados` | Porra F1 | Calcula y muestra los puntos y podio del GP reciente |
+| `!porra tabla` | Porra F1 | Clasificación general acumulada de la temporada en el grupo |
+| `!porra reglas` | Porra F1 | Explica el sistema de puntuación y normas del juego |
 | `!motogp prox` | MotoGP | Horarios y circuito del próximo GP de MotoGP |
 | `!motogp pilotos` | MotoGP | Clasificación del Mundial de Pilotos de MotoGP |
 | `!motogp constructores`| MotoGP | Clasificación de Constructores / Marcas de MotoGP |
 | `!motogp ult` | MotoGP | Resultados de la última carrera de MotoGP |
-| `!f1 suscribir` | Ambos | Activa las alertas automáticas para tu número o grupo |
-| `!f1 desuscribir` | Ambos | Cancela las alertas automáticas |
-| `!f1 estado` | Ambos | Consulta si estás activo en la lista de alertas |
+| `!f1 suscribir` | Alertas | Activa las 3 alertas automáticas para tu número o grupo |
+| `!f1 desuscribir` | Alertas | Cancela las alertas automáticas |
+| `!f1 estado` | Alertas | Consulta si estás activo en la lista de alertas |
 
 ---
 
@@ -71,7 +87,8 @@ El bot envía **únicamente 3 alertas exclusivas** por cada fin de semana de Gra
 - **WhatsApp Engine:** `@whiskeysockets/baileys`
 - **Base de Datos:** PostgreSQL en **Supabase** (IPv4 pooler)
 - **ORM:** Prisma v6
-- **APIs de Datos:**
+- **APIs de Datos e Inteligencia Artificial:**
+  - AI Engine: **Google Gemini AI** (`GEMINI_API_KEY`) para Jarvis AI y Pitwall AI
   - F1: Jolpica F1 API (sucesor oficial de Ergast)
   - MotoGP: Official MotoGP Pulselive API
 - **Scheduler:** `node-cron`
