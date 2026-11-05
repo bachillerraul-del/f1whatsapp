@@ -66,9 +66,10 @@ El bot envía **únicamente 3 alertas exclusivas** por cada fin de semana de Gra
 | `!f1 constructores` | F1 | Clasificación de Escuderías de F1 |
 | `!f1 ult` | F1 | Resultados del último GP de F1 |
 | `!porra [P4] [P5] [P6] [Alo] [Sai]` | Porra F1 | Envía o modifica tu pronóstico (ej. `!porra norris leclerc piastri P8 P5`) |
+| `!porra analizar` | Porra F1 | Auditoría de tu apuesta con telemetría de Jarvis AI y Pitwall AI |
 | `!porra ver` | Porra F1 | Ver los pronósticos registrados en el grupo para el próximo GP |
-| `!porra ia` | Porra F1 | Desafiar / ver los pronósticos de Jarvis AI y Pitwall AI con Gemini |
-| `!porra resultados` | Porra F1 | Calcula y muestra los puntos y podio del GP reciente |
+| `!porra ia` | Porra F1 | Estado/pronósticos de Jarvis AI y Pitwall AI con Gemini (2h antes de Qualy) |
+| `!porra resultados` | Porra F1 | Calcula y muestra los puntos, podio gráfico PNG y radio de equipo F1 |
 | `!porra tabla` | Porra F1 | Clasificación general acumulada de la temporada en el grupo |
 | `!porra reglas` | Porra F1 | Explica el sistema de puntuación y normas del juego |
 | `!motogp prox` | MotoGP | Horarios y circuito del próximo GP de MotoGP |

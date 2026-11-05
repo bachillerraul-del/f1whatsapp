@@ -8,7 +8,14 @@ import {
   parsePosOrDNF,
   formatPos,
 } from "./f1-drivers.js";
-import { ensureAIParticipants } from "./ai-participants.js";
+import {
+  ensureAIParticipants,
+  checkAIPredictionWindow,
+  getAIPendingMessage,
+  AI_PARTICIPANTS,
+  auditUserBetWithAI,
+  generatePostRaceRadioBanter,
+} from "./ai-participants.js";
 
 export {
   type F1DriverDef,
@@ -49,9 +56,10 @@ export const PORRA_RULES_MESSAGE = `🏁 *LA PORRA DE F1* 🏎️🇪🇸\n` +
   `🚫 *Regla anti-copia:* No puedes coincidir en más de 3 pronósticos con otro participante del grupo (máximo 3 coincidencias de 5).\n\n` +
   `📊 *COMANDOS DISPONIBLES:*\n` +
   `🔹 *!porra [apuesta]* : Enviar o modificar tu apuesta\n` +
+  `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
   `🔹 *!porra ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
-  `🔹 *!porra ia* : Ver/desafiar los pronósticos de Jarvis AI y Pitwall AI\n` +
-  `🔹 *!porra resultados* : Calcular puntos y podio gráfico del GP\n` +
+  `🔹 *!porra ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
+  `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio de equipo tras la carrera\n` +
   `🔹 *!porra tabla* : Clasificación general de la temporada`;
 
 interface ParsedPorra {
@@ -220,7 +228,7 @@ export async function handlePorraCommand(
     return calculatePorraResults(groupJid);
   }
 
-  // 5. Invocar o forzar apuestas de la IA (Jarvis AI & Pitwall AI)
+  // 5. Invocar o consultar pronósticos de la IA (Jarvis AI & Pitwall AI)
   if (subCommand === "ia" || subCommand === "ai" || subCommand === "jarvis" || subCommand === "pitwall") {
     try {
       const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
@@ -229,14 +237,97 @@ export async function handlePorraCommand(
       const season = parseInt(race.season, 10);
       const round = parseInt(race.round, 10);
       const raceName = race.raceName || `GP Ronda ${round}`;
-      const aiRes = await ensureAIParticipants(groupJid, season, round, raceName);
+
+      const windowStatus = checkAIPredictionWindow(race);
+      const isForced = parts.some((p) => ["forzar", "force", "test", "simular"].includes(p.toLowerCase()));
+
+      if (windowStatus.isClosed) {
+        return `🔒 *APUESTAS DE LA IA CERRADAS* 🏁\n` +
+          `La Clasificación del *${raceName}* ya ha comenzado. Consulta las apuestas registradas con *!porra ver*.`;
+      }
+
+      if (!windowStatus.isOpen && !isForced) {
+        return getAIPendingMessage(race, windowStatus.diffMinutes);
+      }
+
+      // Si está en la ventana de 2h o se ha forzado modo simulación/test:
+      const aiRes = await ensureAIParticipants(groupJid, season, round, raceName, {
+        force: isForced,
+        raceDateStr: race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined,
+      });
+
+      if (isForced) {
+        return `⚠️ *[MODO SIMULACIÓN / TEST PREVIO ACTIVADO]*\n` +
+          `_Nota: Los libres aún no han terminado, pronóstico de prueba:_\n\n${aiRes.text}`;
+      }
       return aiRes.text;
     } catch (err: any) {
-      return "⚠️ Error al generar pronósticos de la IA.";
+      console.error("Error en comando IA:", err?.message);
+      return "⚠️ Error al consultar el estado de la IA.";
     }
   }
 
-  // 6. Registrar apuesta humana
+  // 6. INTERACCIÓN PREVIA: Analizar o auditar una apuesta con Jarvis AI y Pitwall AI
+  if (subCommand === "analizar" || subCommand === "auditar" || subCommand === "opinar" || subCommand === "roast") {
+    try {
+      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
+      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+      if (!race) return "⚠️ No hay información de la próxima carrera disponible.";
+      const season = parseInt(race.season, 10);
+      const round = parseInt(race.round, 10);
+      const raceName = race.raceName || `GP Ronda ${round}`;
+      const raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+
+      const analyzeArgs = parts.slice(2);
+      let betToAnalyze: any = null;
+
+      if (analyzeArgs.length > 0) {
+        const { parsed, error } = parsePorraArgs(analyzeArgs);
+        if (error || !parsed) {
+          return error || "⚠️ No se pudo interpretar la apuesta a analizar.";
+        }
+        betToAnalyze = {
+          userName,
+          p4Name: parsed.p4.name,
+          p4Driver: parsed.p4.id,
+          p5Name: parsed.p5.name,
+          p5Driver: parsed.p5.id,
+          p6Name: parsed.p6.name,
+          p6Driver: parsed.p6.id,
+          alonsoPos: parsed.alonsoPos,
+          sainzPos: parsed.sainzPos,
+        };
+      } else {
+        // Buscar la apuesta registrada del usuario en la base de datos
+        const userBet = await prisma.porraBet.findUnique({
+          where: {
+            groupJid_season_round_userJid: {
+              groupJid,
+              season,
+              round,
+              userJid,
+            },
+          },
+        });
+
+        if (!userBet) {
+          return `❓ *No tienes ninguna apuesta registrada aún para el ${raceName}*.\n\n` +
+            `👉 Envía primero tu apuesta con:\n` +
+            `*!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n\n` +
+            `O analiza una idea al instante escribiendo:\n` +
+            `*!porra analizar norris leclerc piastri P8 P5*`;
+        }
+        betToAnalyze = userBet;
+      }
+
+      return await auditUserBetWithAI(betToAnalyze, raceName, season, raceDateStr);
+    } catch (err: any) {
+      console.error("Error en auditoría IA:", err?.message);
+      return "⚠️ Error al conectar con los ingenieros de IA.";
+    }
+  }
+
+  // 7. Registrar apuesta humana
   const betArgs = parts.slice(1);
   return registerPorraBet(groupJid, userJid, userName, betArgs);
 }
@@ -399,11 +490,31 @@ async function showGroupBets(groupJid: string): Promise<string> {
   const round = parseInt(race.round, 10);
   const raceName = race.raceName || `GP Ronda ${round}`;
 
-  // Asegurar que las IAs participan en este grupo
-  try {
-    await ensureAIParticipants(groupJid, season, round, raceName);
-  } catch (err: any) {
-    console.error("Error asegurando IAs en showGroupBets:", err?.message);
+  const windowStatus = checkAIPredictionWindow(race);
+
+  if (windowStatus.isOpen) {
+    // Si estamos dentro de las 2 horas previas a la Qualy, asegurar que las IAs participen con datos de libres
+    try {
+      await ensureAIParticipants(groupJid, season, round, raceName, {
+        raceDateStr: race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined,
+      });
+    } catch (err: any) {
+      console.error("Error asegurando IAs en showGroupBets:", err?.message);
+    }
+  } else if (!windowStatus.isClosed) {
+    // Si aún faltan más de 2 horas (días u horas antes), limpiar apuestas prematuras de la IA
+    try {
+      await prisma.porraBet.deleteMany({
+        where: {
+          groupJid,
+          season,
+          round,
+          userJid: { in: [AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id] },
+        },
+      });
+    } catch (err: any) {
+      // omit
+    }
   }
 
   const bets = await prisma.porraBet.findMany({
@@ -416,12 +527,17 @@ async function showGroupBets(groupJid: string): Promise<string> {
   });
 
   if (bets.length === 0) {
-    return `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁\n` +
+    let emptyMsg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
       `_Aún no hay apuestas registradas en este grupo._\n\n` +
       `👉 ¡Sé el primero en enviar tu pronóstico!\n` +
       `Usa: *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n` +
       `Ejemplo: *!porra norris leclerc piastri P8 P5*`;
+
+    if (!windowStatus.isOpen && !windowStatus.isClosed) {
+      emptyMsg += `\n\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy (tras analizar FP1, FP2 y FP3)._`;
+    }
+    return emptyMsg;
   }
 
   let msg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁\n` +
@@ -436,6 +552,10 @@ async function showGroupBets(groupJid: string): Promise<string> {
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
     `Total: *${bets.length}* participante(s).\n` +
     `🔒 Cierre de apuestas: inicio de la Qualy.`;
+
+  if (!windowStatus.isOpen && !windowStatus.isClosed) {
+    msg += `\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy (tras analizar FP1, FP2 y FP3)._`;
+  }
 
   return msg;
 }
@@ -626,8 +746,33 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
       `   _${item.breakdown}_\n\n`;
   }
 
-  msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `💡 _Consulta la clasificación general acumulada con *!porra tabla*._`;
+  // INTERACCIÓN POSTERIOR: Mensajes de radio de equipo (Team Radio Banter) con Jarvis AI y Pitwall AI
+  try {
+    const winner = evaluated[0];
+    const lastPlace = evaluated.length > 1 ? evaluated[evaluated.length - 1] : undefined;
+    const jarvisEvaluated = evaluated.find((u) => u.userName.includes("Jarvis"));
+    const pitwallEvaluated = evaluated.find((u) => u.userName.includes("Pitwall"));
+
+    const radioBanter = await generatePostRaceRadioBanter({
+      raceName,
+      winner: { userName: winner.userName, points: winner.points },
+      lastPlace: lastPlace ? { userName: lastPlace.userName, points: lastPlace.points } : undefined,
+      jarvisPoints: jarvisEvaluated?.points,
+      pitwallPoints: pitwallEvaluated?.points,
+      officialP4: p4Official.name,
+      officialP5: p5Official.name,
+      officialP6: p6Official.name,
+      officialAlo: aloDisplay,
+      officialSai: saiDisplay,
+    });
+
+    msg += `${radioBanter}\n\n` +
+      `💡 _Consulta la clasificación general acumulada con *!porra tabla*._`;
+  } catch (err: any) {
+    console.error("Error generando team radio banter:", err?.message);
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💡 _Consulta la clasificación general acumulada con *!porra tabla*._`;
+  }
 
   // Generar imagen gráfica del podio
   const podiumData = evaluated.slice(0, 3).map((u) => ({

@@ -42,7 +42,11 @@ interface AIPredictionResult {
 /**
  * Recopila telemetría real del fin de semana (Entrenamientos Libres y Mundial)
  */
-async function fetchF1RealTimeTelemetry(): Promise<string> {
+async function fetchF1RealTimeTelemetry(
+  raceName: string,
+  season: number,
+  raceDateStr?: string
+): Promise<string> {
   let context = "";
 
   // 1. Clasificación oficial del Mundial de Pilotos (Jolpica)
@@ -64,19 +68,56 @@ async function fetchF1RealTimeTelemetry(): Promise<string> {
     console.error("Error obteniendo clasificación para telemetría IA:", e?.message);
   }
 
-  // 2. Tiempos y posiciones en Entrenamientos Libres (OpenF1)
+  // 2. Tiempos y posiciones en Entrenamientos Libres de este Gran Premio específico (OpenF1)
   try {
-    const sessRes = await axios.get("https://api.openf1.org/v1/sessions?meeting_key=latest", { timeout: 6000 });
-    const practices = (sessRes.data || []).filter((s: any) => s.session_name?.includes("Practice"));
-    if (practices.length > 0) {
-      const latestFP = practices[practices.length - 1];
-      const resultsRes = await axios.get(`https://api.openf1.org/v1/session_result?session_key=${latestFP.session_key}`, { timeout: 6000 });
-      const driversRes = await axios.get(`https://api.openf1.org/v1/drivers?session_key=${latestFP.session_key}`, { timeout: 6000 });
-      const driverMap = new Map((driversRes.data || []).map((d: any) => [d.driver_number, d]));
+    const meetingsRes = await axios.get(`https://api.openf1.org/v1/meetings?year=${season}`, { timeout: 6000 });
+    const meetings = meetingsRes.data || [];
+    let targetMeeting: any = null;
 
-      const sorted = (resultsRes.data || []).sort((a: any, b: any) => a.position - b.position);
-      if (sorted.length > 0) {
-        context += `\nTELEMETRÍA DE ENTRENAMIENTOS LIBRES (${latestFP.session_name} - ${latestFP.circuit_short_name || "Circuito"}):\n`;
+    if (raceDateStr) {
+      const rDate = new Date(raceDateStr);
+      targetMeeting = meetings.find((m: any) => {
+        const mDate = new Date(m.date_start);
+        const diffDays = Math.abs(mDate.getTime() - rDate.getTime()) / (1000 * 60 * 60 * 24);
+        return diffDays <= 4;
+      });
+    }
+
+    if (!targetMeeting) {
+      targetMeeting = meetings.find((m: any) =>
+        raceName.toLowerCase().includes(m.circuit_short_name?.toLowerCase() || "___") ||
+        raceName.toLowerCase().includes(m.meeting_name?.toLowerCase() || "___")
+      );
+    }
+
+    if (targetMeeting) {
+      const sessRes = await axios.get(`https://api.openf1.org/v1/sessions?meeting_key=${targetMeeting.meeting_key}`, { timeout: 6000 });
+      const practices = (sessRes.data || []).filter((s: any) => s.session_name?.includes("Practice"));
+
+      // Buscar de la última a la primera práctica que tenga resultados computados
+      let latestResults: any[] = [];
+      let latestSession: any = null;
+
+      for (let pIdx = practices.length - 1; pIdx >= 0; pIdx--) {
+        const p = practices[pIdx];
+        try {
+          const resRes = await axios.get(`https://api.openf1.org/v1/session_result?session_key=${p.session_key}`, { timeout: 4000 });
+          if (Array.isArray(resRes.data) && resRes.data.length > 0) {
+            latestResults = resRes.data;
+            latestSession = p;
+            break;
+          }
+        } catch {
+          // Sesión no disputada aún o sin resultados
+        }
+      }
+
+      if (latestSession && latestResults.length > 0) {
+        const driversRes = await axios.get(`https://api.openf1.org/v1/drivers?session_key=${latestSession.session_key}`, { timeout: 6000 });
+        const driverMap = new Map((driversRes.data || []).map((d: any) => [d.driver_number, d]));
+        const sorted = latestResults.sort((a: any, b: any) => a.position - b.position);
+
+        context += `\nTELEMETRÍA REAL DE ENTRENAMIENTOS LIBRES (${latestSession.session_name} - ${targetMeeting.meeting_name}):\n`;
         const top6 = sorted.slice(0, 6).map((r: any) => {
           const d: any = driverMap.get(r.driver_number);
           return `P${r.position}: ${d?.broadcast_name || r.driver_number} (${d?.team_name || ""})`;
@@ -87,10 +128,12 @@ async function fetchF1RealTimeTelemetry(): Promise<string> {
         const saifp = sorted.find((r: any) => r.driver_number === 55);
         if (alofp) context += `- Alonso en Libres: P${alofp.position}\n`;
         if (saifp) context += `- Sainz en Libres: P${saifp.position}\n`;
+      } else {
+        context += `\nESTADO DE ENTRENAMIENTOS: Los entrenamientos libres de este Gran Premio aún están por disputarse o en progreso. Análisis fundamentado en ritmo de mundial y configuración de circuito.\n`;
       }
     }
   } catch (e: any) {
-    // OpenF1 no disponible o aún no hay libres disputados
+    // OpenF1 no disponible
   }
 
   return context;
@@ -103,12 +146,13 @@ async function askGeminiForPrediction(
   personality: AIPersonality,
   raceName: string,
   season: number,
-  existingBets: any[]
+  existingBets: any[],
+  raceDateStr?: string
 ): Promise<AIPredictionResult | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const telemetry = await fetchF1RealTimeTelemetry();
+  const telemetry = await fetchF1RealTimeTelemetry(raceName, season, raceDateStr);
   const driversList = KNOWN_DRIVERS.map((d) => d.id).join(", ");
   const existingSummaries = existingBets
     .map((b) => `${b.userName}: P4=${b.p4Driver}, P5=${b.p5Driver}, P6=${b.p6Driver}, Alo=${b.alonsoPos}, Sai=${b.sainzPos}`)
@@ -221,6 +265,93 @@ function generateHeuristicPrediction(
   }
 }
 
+export interface AIPredictionWindowStatus {
+  isOpen: boolean;
+  isClosed: boolean;
+  qualyDate?: Date;
+  diffMinutes: number;
+}
+
+/**
+ * Comprueba si la ventana para que las IAs formulen sus apuestas está abierta.
+ * La ventana oficial se abre 2 horas (120 minutos) antes de la Qualy (Q1),
+ * tras haberse disputado y cerrado FP1, FP2 y FP3.
+ */
+export function checkAIPredictionWindow(race: any): AIPredictionWindowStatus {
+  if (!race?.Qualifying?.date) {
+    return { isOpen: true, isClosed: false, diffMinutes: 0 };
+  }
+
+  const qualyTime = race.Qualifying.time || "14:00:00Z";
+  const qualyDate = new Date(`${race.Qualifying.date}T${qualyTime}`);
+  const now = new Date();
+  const diffMinutes = Math.round((qualyDate.getTime() - now.getTime()) / (1000 * 60));
+
+  if (diffMinutes <= 0) {
+    return { isOpen: false, isClosed: true, qualyDate, diffMinutes };
+  }
+
+  if (diffMinutes <= 120) {
+    return { isOpen: true, isClosed: false, qualyDate, diffMinutes };
+  }
+
+  return { isOpen: false, isClosed: false, qualyDate, diffMinutes };
+}
+
+function formatRemainingTime(minutes: number): string {
+  if (minutes < 60) return `${minutes} minutos`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return `${hours}h${remainingMinutes > 0 ? " " + remainingMinutes + "m" : ""}`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return `${days} día${days > 1 ? "s" : ""}${remHours > 0 ? " y " + remHours + "h" : ""}`;
+}
+
+/**
+ * Mensaje in-character de Jarvis y Pitwall cuando un usuario desafía a la IA
+ * antes de haberse disputado las sesiones de entrenamientos libres.
+ */
+export function getAIPendingMessage(race: any, diffMinutes: number): string {
+  const raceName = race?.raceName || "Gran Premio";
+  const timeStr = formatRemainingTime(diffMinutes);
+
+  let scheduleStr = "";
+  if (race.FirstPractice?.date) {
+    const fp1 = new Date(`${race.FirstPractice.date}T${race.FirstPractice.time || "12:00:00Z"}`);
+    scheduleStr += `  • *FP1:* ${fp1.toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}\n`;
+  }
+  if (race.SecondPractice?.date) {
+    const fp2 = new Date(`${race.SecondPractice.date}T${race.SecondPractice.time || "15:00:00Z"}`);
+    scheduleStr += `  • *FP2:* ${fp2.toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}\n`;
+  }
+  if (race.ThirdPractice?.date) {
+    const fp3 = new Date(`${race.ThirdPractice.date}T${race.ThirdPractice.time || "12:00:00Z"}`);
+    scheduleStr += `  • *FP3:* ${fp3.toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}\n`;
+  }
+  if (race.Qualifying?.date) {
+    const q = new Date(`${race.Qualifying.date}T${race.Qualifying.time || "15:00:00Z"}`);
+    scheduleStr += `  • *Clasificación (Q1):* ${q.toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}\n`;
+  }
+
+  return `⏳ *TELEMETRÍA EN ESPERA - JARVIS AI & PITWALL AI* 🏎️📊\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏆 *${raceName.toUpperCase()}*\n` +
+    `⏱️ Faltan *${timeStr}* para el inicio de la Clasificación.\n\n` +
+    `🤖 *Jarvis AI (Estratega Analítico):*\n` +
+    `_«Protocolo en espera: Aún no se han disputado los entrenamientos libres (FP1, FP2 y FP3). Formular un pronóstico sin telemetría de ritmo en pista y degradación violaría mis algoritmos de precisión.»_\n\n` +
+    `🤖 *Pitwall AI (Jefe de Muro):*\n` +
+    `_«En el box no quemamos neumáticos antes de tiempo. Esperaremos a ver el ritmo de tanda larga en los libres antes de arriesgar nuestra estrategia con Carlos y Fernando.»_\n\n` +
+    `📅 *SESIONES CLAVE (Hora española):*\n` +
+    (scheduleStr || "  • Consulta los horarios oficiales con *!f1 prox*\n") + `\n` +
+    `⏰ *¿CUÁNDO PUBLICARÁN SUS PRONÓSTICOS?*\n` +
+    `Ambas IAs publicarán automáticamente sus apuestas en este grupo *exactamente 2 horas antes de la Qualy*, con todos los datos de los entrenamientos libres ya procesados.\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💡 _¡Los humanos sí podéis registrar o cambiar ya vuestra apuesta con *!porra*!_`;
+}
+
 /**
  * Registra o actualiza la apuesta de los dos participantes IA (Jarvis y Pitwall) en un grupo
  */
@@ -228,8 +359,23 @@ export async function ensureAIParticipants(
   groupJid: string,
   season: number,
   round: number,
-  raceName: string
+  raceName: string,
+  options?: {
+    force?: boolean;
+    raceDateStr?: string;
+  }
 ): Promise<{ text: string; registeredCount: number }> {
+  if (options?.force) {
+    await prisma.porraBet.deleteMany({
+      where: {
+        groupJid,
+        season,
+        round,
+        userJid: { in: [AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id] },
+      },
+    });
+  }
+
   const existingBets: any[] = await prisma.porraBet.findMany({
     where: { groupJid, season, round },
   });
@@ -242,10 +388,16 @@ export async function ensureAIParticipants(
     const personality = AI_PARTICIPANTS[aiKey];
     const alreadyBet = existingBets.find((b) => b.userJid === personality.id);
 
-    if (alreadyBet) continue; // Ya tiene apuesta registrada para este GP
+    if (alreadyBet && !options?.force) continue; // Ya tiene apuesta registrada
 
     // 1. Intentar con Gemini AI
-    let prediction = await askGeminiForPrediction(personality, raceName, season, existingBets);
+    let prediction = await askGeminiForPrediction(
+      personality,
+      raceName,
+      season,
+      existingBets,
+      options?.raceDateStr
+    );
 
     // 2. Si no hay API key o falló, usar heurística
     if (!prediction) {
@@ -338,8 +490,19 @@ export async function ensureAIParticipants(
   }
 
   if (registeredCount === 0) {
+    const existingJarvis = existingBets.find((b) => b.userJid === AI_PARTICIPANTS.jarvis.id);
+    const existingPitwall = existingBets.find((b) => b.userJid === AI_PARTICIPANTS.pitwall.id);
+    let summary = `🤖 *PRONÓSTICOS REGISTRADOS DE LA IA - ${raceName.toUpperCase()}* ⚡\n━━━━━━━━━━━━━━━━━━━━━\n`;
+    if (existingJarvis) {
+      summary += `🔹 *${AI_PARTICIPANTS.jarvis.name}*:\n  • P4: ${existingJarvis.p4Name} | P5: ${existingJarvis.p5Name} | P6: ${existingJarvis.p6Name}\n  • 🇪🇸 Alo: ${formatPos(existingJarvis.alonsoPos)} | Sai: ${formatPos(existingJarvis.sainzPos)}\n\n`;
+    }
+    if (existingPitwall) {
+      summary += `🔹 *${AI_PARTICIPANTS.pitwall.name}*:\n  • P4: ${existingPitwall.p4Name} | P5: ${existingPitwall.p5Name} | P6: ${existingPitwall.p6Name}\n  • 🇪🇸 Alo: ${formatPos(existingPitwall.alonsoPos)} | Sai: ${formatPos(existingPitwall.sainzPos)}\n\n`;
+    }
+    summary += `━━━━━━━━━━━━━━━━━━━━━\nConsulta todos los pronósticos con *!porra ver*.`;
+
     return {
-      text: `ℹ️ *Jarvis AI* y *Pitwall AI* ya tienen sus pronósticos registrados para el *${raceName}*. Puedes verlos con *!porra ver*.`,
+      text: summary,
       registeredCount: 0,
     };
   }
@@ -356,4 +519,184 @@ export async function ensureAIParticipants(
     text: header,
     registeredCount,
   };
+}
+
+export interface UserBetToAnalyze {
+  userName: string;
+  p4Name: string;
+  p4Driver: string;
+  p5Name: string;
+  p5Driver: string;
+  p6Name: string;
+  p6Driver: string;
+  alonsoPos: number; // 0=DNF, 1..22
+  sainzPos: number;
+}
+
+/**
+ * INTERACCIÓN PREVIA: Auditoría y crítica de una apuesta con Jarvis AI y Pitwall AI
+ */
+export async function auditUserBetWithAI(
+  bet: UserBetToAnalyze,
+  raceName: string,
+  season: number,
+  raceDateStr?: string
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const telemetry = await fetchF1RealTimeTelemetry(raceName, season, raceDateStr);
+
+  const aloStr = bet.alonsoPos === 0 ? "DNF (Abandono)" : `P${bet.alonsoPos}`;
+  const saiStr = bet.sainzPos === 0 ? "DNF (Abandono)" : `P${bet.sainzPos}`;
+
+  let probability = "14%";
+  let jarvisComment = "Degradación y ritmo de carrera comprometen las posiciones elegidas en zona media.";
+  let pitwallComment = "¡Apuesta agresiva! Si hay coche de seguridad o lluvia en pista, puedes llevarte el podio.";
+
+  if (apiKey) {
+    const prompt = `Eres el panel técnico de ingenieros de F1 compuesto por Jarvis AI y Pitwall AI.
+Estamos en la temporada ${season}, disputando el "${raceName}".
+El jugador "${bet.userName}" ha registrado el siguiente pronóstico:
+- P4: ${bet.p4Name}
+- P5: ${bet.p5Name}
+- P6: ${bet.p6Name}
+- Fernando Alonso (Aston Martin): ${aloStr}
+- Carlos Sainz (Williams): ${saiStr}
+
+DATOS Y TELEMETRÍA REAL:
+${telemetry}
+
+INSTRUCCIONES:
+1. Evalúa la viabilidad del pronóstico de ${bet.userName} con realismo técnico y humor F1.
+2. Jarvis AI: Estratega analítico. Evalúa con telemetría y ritmo real de libres/mundial (máx 25 palabras).
+3. Pitwall AI: Ingeniero de muro pasional y agresivo. Opina con tono de muro de boxes y banderas (máx 25 palabras).
+4. Estima un porcentaje de probabilidad creíble (ej: "9%", "22%", etc.).
+
+Responde ÚNICAMENTE un JSON válido con este formato:
+{
+  "probability": "18%",
+  "jarvis": "Comentario técnico de Jarvis...",
+  "pitwall": "Comentario apasionado de Pitwall..."
+}`;
+
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 250,
+              responseMimeType: "application/json",
+            },
+          },
+          { timeout: 9000 }
+        );
+        const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          const data = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+          if (data.jarvis && data.pitwall) {
+            probability = data.probability || "15%";
+            jarvisComment = data.jarvis;
+            pitwallComment = data.pitwall;
+            break;
+          }
+        }
+      } catch {
+        // siguiente modelo
+      }
+    }
+  }
+
+  return `📊 *AUDITORÍA TELEMÉTRICA DE APUESTA* 🏎️🔍\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `👤 *Piloto:* ${bet.userName}\n` +
+    `🏆 *Gran Premio:* ${raceName}\n` +
+    `🎯 *Pronóstico auditado:*\n` +
+    `  • P4: *${bet.p4Name}* | P5: *${bet.p5Name}* | P6: *${bet.p6Name}*\n` +
+    `  • 🇪🇸 Alonso: *${formatPos(bet.alonsoPos)}* | Sainz: *${formatPos(bet.sainzPos)}*\n\n` +
+    `📈 *Probabilidad estimada:* *${probability}*\n\n` +
+    `🤖 *Jarvis AI (Telemetría):*\n` +
+    `_«${jarvisComment}»_\n\n` +
+    `🤖 *Pitwall AI (Muro de Boxes):*\n` +
+    `_«${pitwallComment}»_\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💡 _Puedes afinar o cambiar tu pronóstico antes de la Qualy con *!porra*._`;
+}
+
+export interface PostRaceRadioData {
+  raceName: string;
+  winner: { userName: string; points: number };
+  lastPlace?: { userName: string; points: number };
+  jarvisPoints?: number;
+  pitwallPoints?: number;
+  officialP4: string;
+  officialP5: string;
+  officialP6: string;
+  officialAlo: string;
+  officialSai: string;
+}
+
+/**
+ * INTERACCIÓN POSTERIOR: Mensajes de radio de equipo tras la carrera con felicitaciones y pique
+ */
+export async function generatePostRaceRadioBanter(data: PostRaceRadioData): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  let jarvisMsg = `Enhorabuena a ${data.winner.userName}. Los datos no mienten: su modelo predictivo superó hoy al resto de la parrilla.`;
+  let pitwallMsg = `¡Qué carrerón! Box, box para ${data.lastPlace?.userName || "el pelotón de cola"}, necesitamos cambio de alerón y estrategia urgente.`;
+
+  if (apiKey) {
+    const prompt = `Eres el sistema de radio de equipo (Team Radio) de F1 para Jarvis AI y Pitwall AI tras el "${data.raceName}".
+Resultados de la porra en el grupo:
+- Ganador de la jornada: ${data.winner.userName} con ${data.winner.points} pts.
+${data.lastPlace ? `- Último lugar: ${data.lastPlace.userName} con ${data.lastPlace.points} pts.` : ""}
+- Puntos conseguidos por Jarvis AI: ${data.jarvisPoints ?? 0} pts.
+- Puntos conseguidos por Pitwall AI: ${data.pitwallPoints ?? 0} pts.
+Llegada real oficial: P4: ${data.officialP4}, P5: ${data.officialP5}, P6: ${data.officialP6}, Alonso: ${data.officialAlo}, Sainz: ${data.officialSai}.
+
+Genera dos mensajes de radio cortos estilo F1 (máx 20 palabras cada uno):
+1. Jarvis AI: Frase analítica/técnica felicitando al ganador o comentando la telemetría del fin de semana.
+2. Pitwall AI: Frase visceral y divertida de radio de boxes vacilando al perdedor o celebrando el espectáculo.
+
+Responde ÚNICAMENTE en JSON válido:
+{
+  "jarvis": "...",
+  "pitwall": "..."
+}`;
+
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.8,
+              maxOutputTokens: 200,
+              responseMimeType: "application/json",
+            },
+          },
+          { timeout: 7000 }
+        );
+        const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          const parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+          if (parsed.jarvis && parsed.pitwall) {
+            jarvisMsg = parsed.jarvis;
+            pitwallMsg = parsed.pitwall;
+            break;
+          }
+        }
+      } catch {
+        // siguiente modelo
+      }
+    }
+  }
+
+  return `📻 *RADIO DE EQUIPO TRAS LA BANDERA A CUADROS* 🏁\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🤖 *Jarvis AI:* _«${jarvisMsg}»_\n\n` +
+    `🤖 *Pitwall AI:* _«${pitwallMsg}»_\n` +
+    `━━━━━━━━━━━━━━━━━━━━━`;
 }

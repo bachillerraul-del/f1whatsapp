@@ -45,9 +45,11 @@ const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `🔹 *!f1 constructores* : Clasificación de escuderías\n` +
   `🔹 *!f1 ult* : Resultados de la última carrera\n\n` +
   `🏆 *LA PORRA DE F1 (JUEGO):*\n` +
-  `🔹 *!porra [P4] [P5] [P6] [Alonso] [Sainz]* : Enviar pronóstico (ej: !porra norris leclerc piastri P8 P5)\n` +
-  `🔹 *!porra ver* : Ver las apuestas del grupo\n` +
-  `🔹 *!porra resultados* : Calcular puntos y podio del GP\n` +
+  `🔹 *!porra [P4] [P5] [P6] [Alonso] [Sainz]* : Enviar o editar pronóstico\n` +
+  `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
+  `🔹 *!porra ver* : Ver las apuestas del grupo (humanos e IAs)\n` +
+  `🔹 *!porra ia* : Estado/pronósticos de Jarvis AI y Pitwall AI\n` +
+  `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio F1\n` +
   `🔹 *!porra tabla* : Clasificación general de la temporada\n` +
   `🔹 *!porra reglas* : Sistema de puntos y normas\n\n` +
   `🏍️ *MOTOGP:*\n` +

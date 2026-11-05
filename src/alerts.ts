@@ -88,11 +88,23 @@ export function setupAlerts(sock: WASocket) {
             if (!(await wasAlertSent(alertKey))) {
               console.log(`🚀 [Alerta Porra F1] 2h antes de la Qualy para ${race.raceName}`);
 
-              // Asegurar que las IAs participen en cada grupo
+              const season = parseInt(race.season, 10);
+              const round = parseInt(race.round, 10);
+              const raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+
+              // Asegurar que las IAs participen en cada grupo con telemetría definitiva de los 3 libres
               const subscribers = await getActiveSubscribers();
+              let aiSummary = "";
+
               for (const sub of subscribers) {
                 try {
-                  await ensureAIParticipants(sub.jid, parseInt(race.season, 10), parseInt(race.round, 10), race.raceName);
+                  const aiRes = await ensureAIParticipants(sub.jid, season, round, race.raceName, {
+                    force: true,
+                    raceDateStr,
+                  });
+                  if (!aiSummary && aiRes.text) {
+                    aiSummary = aiRes.text;
+                  }
                 } catch (e: any) {
                   // omit
                 }
@@ -102,7 +114,7 @@ export function setupAlerts(sock: WASocket) {
                 `━━━━━━━━━━━━━━━━━━━━━\n` +
                 `🏎️ *${race.raceName}*\n` +
                 `⏱️ La Clasificación (Qualy) comienza en 2 horas.\n\n` +
-                `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus estrategias con Gemini.\n` +
+                (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus estrategias tras analizar los entrenamientos libres.\n\n`) +
                 `👉 ¡Última oportunidad para enviar o modificar tu pronóstico!\n` +
                 `Usa: *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n` +
                 `_Ejemplo: !porra norris leclerc piastri P8 P5 (o DNF si crees que abandonan)_\n\n` +
