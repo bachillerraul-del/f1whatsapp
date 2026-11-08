@@ -278,8 +278,9 @@ export function setupAlerts(sock: WASocket) {
           const hoursSinceRace = (now.getTime() - raceDate.getTime()) / (1000 * 60 * 60);
 
           if (hoursSinceRace >= 0 && hoursSinceRace <= 72) {
-            // Buscar todos los grupos que tengan apuestas registradas para este GP de F1
-            const distinctGroups = await prisma.porraBet.findMany({
+            // Obtener todos los suscriptores activos y todos los grupos con apuestas
+            const subscribers = await getActiveSubscribers();
+            const distinctBetGroups = await prisma.porraBet.findMany({
               where: {
                 sport: "f1",
                 season,
@@ -289,8 +290,15 @@ export function setupAlerts(sock: WASocket) {
               distinct: ["groupJid"],
             });
 
-            if (distinctGroups.length > 0) {
-              console.log(`🏆 [Auto-Resultados Porra F1] Enviando resultados a ${distinctGroups.length} grupo(s) para ${lastRace.raceName}`);
+            // Conjunto unificado de destinatarios
+            const targetJids = new Set<string>();
+            subscribers.forEach((s) => targetJids.add(s.jid));
+            distinctBetGroups.forEach((g) => targetJids.add(g.groupJid));
+
+            const betGroupsSet = new Set(distinctBetGroups.map((g) => g.groupJid));
+
+            if (targetJids.size > 0) {
+              console.log(`🏆 [Auto-Resultados F1] Notificando a ${targetJids.size} chat(s) para ${lastRace.raceName}`);
 
               // Obtener resultados oficiales de la carrera
               let raceResultsText = "";
@@ -300,38 +308,40 @@ export function setupAlerts(sock: WASocket) {
                 console.error("Error obteniendo resultados oficiales F1:", e?.message);
               }
 
-              for (const g of distinctGroups) {
+              for (const jid of targetJids) {
                 try {
                   // Respetar la configuración de bot activo/inactivo
-                  const active = await isBotActiveInChat(g.groupJid);
+                  const active = await isBotActiveInChat(jid);
                   if (!active) continue;
 
                   // 1. Enviar primero los resultados oficiales de la carrera
                   if (raceResultsText) {
-                    await sock.sendMessage(g.groupJid, {
+                    await sock.sendMessage(jid, {
                       text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏎️\n\n${raceResultsText}`,
                     });
                   }
 
-                  // 2. Enviar resultados de la porra con podio
-                  const res = await calculatePorraResults(g.groupJid, "f1");
-                  const captionText = `📢 *¡RESULTADOS DE LA PORRA DE F1!* 🏆🏎️\n\n` + res.text;
-                  if (res.imageBuffer) {
-                    await sock.sendMessage(g.groupJid, {
-                      image: res.imageBuffer,
-                      caption: captionText,
-                    });
-                  } else {
-                    await sock.sendMessage(g.groupJid, {
-                      text: captionText,
-                    });
+                  // 2. Si este chat tiene apuestas de la porra, enviar podio y clasificación
+                  if (betGroupsSet.has(jid)) {
+                    const res = await calculatePorraResults(jid, "f1");
+                    const captionText = `📢 *¡RESULTADOS DE LA PORRA DE F1!* 🏆🏎️\n\n` + res.text;
+                    if (res.imageBuffer) {
+                      await sock.sendMessage(jid, {
+                        image: res.imageBuffer,
+                        caption: captionText,
+                      });
+                    } else {
+                      await sock.sendMessage(jid, {
+                        text: captionText,
+                      });
+                    }
                   }
                 } catch (e: any) {
-                  console.error(`Error enviando resultados de porra F1 a ${g.groupJid}:`, e?.message);
+                  console.error(`Error enviando resultados F1 a ${jid}:`, e?.message);
                 }
               }
+              await markAlertSent(alertKey);
             }
-            await markAlertSent(alertKey);
           } else if (hoursSinceRace > 72) {
             // Carrera antigua, marcar para no reevaluar
             await markAlertSent(alertKey);
@@ -350,7 +360,8 @@ export function setupAlerts(sock: WASocket) {
       if (motoData && motoData.top5.length >= 5) {
         const alertKey = `motogp-${motoData.season}-${motoData.round}-auto-porra-results`;
         if (!(await wasAlertSent(alertKey))) {
-          const distinctGroups = await prisma.porraBet.findMany({
+          const subscribers = await getActiveSubscribers();
+          const distinctBetGroups = await prisma.porraBet.findMany({
             where: {
               sport: "motogp",
               season: motoData.season,
@@ -360,8 +371,15 @@ export function setupAlerts(sock: WASocket) {
             distinct: ["groupJid"],
           });
 
-          if (distinctGroups.length > 0) {
-            console.log(`🏆 [Auto-Resultados Porra MotoGP] Enviando resultados a ${distinctGroups.length} grupo(s) para ${motoData.raceName}`);
+          // Conjunto unificado de destinatarios
+          const targetJids = new Set<string>();
+          subscribers.forEach((s) => targetJids.add(s.jid));
+          distinctBetGroups.forEach((g) => targetJids.add(g.groupJid));
+
+          const betGroupsSet = new Set(distinctBetGroups.map((g) => g.groupJid));
+
+          if (targetJids.size > 0) {
+            console.log(`🏆 [Auto-Resultados MotoGP] Notificando a ${targetJids.size} chat(s) para ${motoData.raceName}`);
 
             // Obtener resultados oficiales de la carrera de MotoGP
             let motoRaceResultsText = "";
@@ -371,38 +389,40 @@ export function setupAlerts(sock: WASocket) {
               console.error("Error obteniendo resultados oficiales MotoGP:", e?.message);
             }
 
-            for (const g of distinctGroups) {
+            for (const jid of targetJids) {
               try {
                 // Respetar la configuración de bot activo/inactivo
-                const active = await isBotActiveInChat(g.groupJid);
+                const active = await isBotActiveInChat(jid);
                 if (!active) continue;
 
                 // 1. Enviar primero los resultados oficiales de la carrera
                 if (motoRaceResultsText) {
-                  await sock.sendMessage(g.groupJid, {
+                  await sock.sendMessage(jid, {
                     text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏍️\n\n${motoRaceResultsText}`,
                   });
                 }
 
-                // 2. Enviar resultados de la porra con podio
-                const res = await calculatePorraResults(g.groupJid, "motogp");
-                const captionText = `📢 *¡RESULTADOS DE LA PORRA DE MOTOGP!* 🏆🏍️\n\n` + res.text;
-                if (res.imageBuffer) {
-                  await sock.sendMessage(g.groupJid, {
-                    image: res.imageBuffer,
-                    caption: captionText,
-                  });
-                } else {
-                  await sock.sendMessage(g.groupJid, {
-                    text: captionText,
-                  });
+                // 2. Si este chat tiene apuestas de la porra, enviar podio y clasificación
+                if (betGroupsSet.has(jid)) {
+                  const res = await calculatePorraResults(jid, "motogp");
+                  const captionText = `📢 *¡RESULTADOS DE LA PORRA DE MOTOGP!* 🏆🏍️\n\n` + res.text;
+                  if (res.imageBuffer) {
+                    await sock.sendMessage(jid, {
+                      image: res.imageBuffer,
+                      caption: captionText,
+                    });
+                  } else {
+                    await sock.sendMessage(jid, {
+                      text: captionText,
+                    });
+                  }
                 }
               } catch (e: any) {
-                console.error(`Error enviando resultados de porra MotoGP a ${g.groupJid}:`, e?.message);
+                console.error(`Error enviando resultados MotoGP a ${jid}:`, e?.message);
               }
             }
+            await markAlertSent(alertKey);
           }
-          await markAlertSent(alertKey);
         }
       }
     } catch (err: any) {
