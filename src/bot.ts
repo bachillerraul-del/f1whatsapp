@@ -28,6 +28,8 @@ import {
   addSubscriber,
   removeSubscriber,
   isSubscribed,
+  isBotActiveInChat,
+  setBotActiveInChat,
   prisma,
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
@@ -79,32 +81,52 @@ const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - F1 & MOTOGP* 🏁\n` +
   `🔹 *!f1 pilotos* : Clasificación del mundial\n` +
   `🔹 *!f1 constructores* : Clasificación de escuderías\n` +
   `🔹 *!f1 ult* : Resultados de la última carrera\n\n` +
-  `🏆 *LA PORRA DE F1 (JUEGO):*\n` +
-  `🔹 *!porra [P4] [P5] [P6] [Alonso] [Sainz]* : Enviar o editar pronóstico\n` +
+  `🏆 *LA PORRA DE F1 (Top 5 + DNF):*\n` +
+  `🔹 *!porra [1º] [2º] [3º] [4º] [5º] [DNF]* : Enviar o editar pronóstico\n` +
   `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
   `🔹 *!porra ver* : Ver las apuestas del grupo (humanos e IAs)\n` +
   `🔹 *!porra ia* : Estado/pronósticos de Jarvis AI y Pitwall AI\n` +
-  `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio F1\n` +
+  `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio de equipo\n` +
+  `🔹 *!porra historial* : Resumen de todos los GPs jugados en la temporada\n` +
   `🔹 *!porra tabla* : Clasificación general de la temporada\n` +
-  `🔹 *!porra reglas* : Sistema de puntos y normas\n\n` +
+  `🔹 *!porra reglas* : Sistema de puntos y normas anti-copia\n\n` +
   `🏍️ *MOTOGP:*\n` +
   `🔹 *!motogp prox* : Próximo GP y horarios (hora España)\n` +
   `🔹 *!motogp pilotos* : Clasificación del mundial\n` +
   `🔹 *!motogp constructores* : Clasificación de marcas\n` +
   `🔹 *!motogp ult* : Resultados del último Gran Premio\n\n` +
+  `🏆 *LA PORRA DE MOTOGP (Top 5 + DNF):*\n` +
+  `🔹 *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF]* : Enviar o editar pronóstico\n` +
+  `🔹 *!porra moto ver* : Ver apuestas de MotoGP del grupo\n` +
+  `🔹 *!porra moto resultados* : Calcular puntos y podio de MotoGP\n` +
+  `🔹 *!porra moto tabla* : Clasificación general de MotoGP\n` +
+  `_(¡O usa directamente !porramoto ...!)_\n\n` +
   `🔔 *ALERTAS AUTOMÁTICAS:*\n` +
-  `🔹 *!f1 suscribir* : Recibir las 3 alertas clave de cada GP\n` +
+  `🔹 *!f1 suscribir* : Recibir las alertas clave de cada GP\n` +
   `🔹 *!f1 desuscribir* : Cancelar suscripción\n` +
-  `🔹 *!f1 estado* : Ver estado de tu suscripción\n` +
+  `🔹 *!f1 estado* : Ver estado de tu suscripción\n\n` +
+  `⚙️ *CONTROL DEL BOT:*\n` +
+  `🔹 *!bot on* : Activar el bot en este chat\n` +
+  `🔹 *!bot off* : Desactivar el bot en este chat\n` +
+  `🔹 *!bot* : Ver estado actual\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
-  `💡 _Envía cualquier comando en el chat para obtener la información._`;
+  `💡 _Envía cualquier comando en el chat para interactuar._`;
 
 const MOTOGP_HELP_MESSAGE = `🏍️ *BOT DE MOTOGP - COMANDOS* 🏁\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
   `🔹 *!motogp prox* : Próximo GP y horarios oficiales (hora peninsular)\n` +
   `🔹 *!motogp pilotos* : Clasificación del mundial de pilotos\n` +
   `🔹 *!motogp constructores* : Clasificación de marcas y equipos\n` +
-  `🔹 *!motogp ult* : Resultados de la última carrera disputada\n` +
+  `🔹 *!motogp ult* : Resultados de la última carrera disputada\n\n` +
+  `🏆 *LA PORRA DE MOTOGP (Top 5 + DNF):*\n` +
+  `🔹 *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF]* : Enviar o editar pronóstico\n` +
+  `🔹 *!porra moto analizar* : Auditoría de tu apuesta con las IAs\n` +
+  `🔹 *!porra moto ver* : Ver apuestas registradas del grupo\n` +
+  `🔹 *!porra moto ia* : Pronósticos de Jarvis AI y Pitwall AI\n` +
+  `🔹 *!porra moto resultados* : Calcular resultados, podio y radio\n` +
+  `🔹 *!porra moto tabla* : Clasificación general de la temporada\n` +
+  `🔹 *!porra moto reglas* : Sistema de puntuación y normas\n` +
+  `_(También disponible con !porramoto ...)_\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
   `💡 _Escribe *!ayuda* para ver todos los deportes (F1 + MotoGP)._`;
 
@@ -238,12 +260,13 @@ export async function startBot() {
       lastMessageLog = `[${new Date().toISOString()}] fromMe=${msg.key.fromMe} text="${cleanText.slice(0, 50)}" from=${msg.key.remoteJid}`;
 
       // Only respond to supported prefixes
+      const isBot = cleanText.startsWith("!bot");
       const isF1 = cleanText.startsWith("!f1");
       const isMotoGP = cleanText.startsWith("!motogp") || cleanText.startsWith("!moto") || cleanText.startsWith("!gp");
-      const isPorra = cleanText.startsWith("!porra");
+      const isPorra = cleanText.startsWith("!porra") || cleanText.startsWith("!porramoto");
       const isGeneralHelp = cleanText === "!ayuda" || cleanText === "!help" || cleanText === "!menu";
 
-      if (!isF1 && !isMotoGP && !isPorra && !isGeneralHelp) continue;
+      if (!isBot && !isF1 && !isMotoGP && !isPorra && !isGeneralHelp) continue;
 
       const remoteJid = msg.key.remoteJid;
       if (!remoteJid) continue;
@@ -252,26 +275,55 @@ export async function startBot() {
       console.log(`📩 [Comando detectado] "${cleanText}" de ${pushName} (${remoteJid})`);
 
       try {
+        // BOT ON/OFF COMMANDS — siempre accesibles (incluso con bot desactivado)
+        if (isBot) {
+          const subCommand = cleanText.replace("!bot", "").trim();
+          if (subCommand === "off" || subCommand === "desactivar") {
+            await setBotActiveInChat(remoteJid, false);
+            await sock.sendMessage(remoteJid, {
+              text: `🔴 *Bot desactivado en este chat.*\n\nYa no responderé a ningún comando aquí.\nPara volver a activarme, escribe *!bot on*.`,
+            });
+          } else if (subCommand === "on" || subCommand === "activar") {
+            await setBotActiveInChat(remoteJid, true);
+            await sock.sendMessage(remoteJid, {
+              text: `🟢 *¡Bot activado en este chat!*\n\nVuelvo a estar operativo. 🏎️🏍️\nEscribe *!ayuda* para ver los comandos disponibles.`,
+            });
+          } else {
+            const active = await isBotActiveInChat(remoteJid);
+            await sock.sendMessage(remoteJid, {
+              text: `🤖 *Estado del bot en este chat:* ${active ? "🟢 Activado" : "🔴 Desactivado"}\n\n` +
+                `🔹 *!bot on* — Activar el bot\n` +
+                `🔹 *!bot off* — Desactivar el bot`,
+            });
+          }
+          continue;
+        }
+
+        // CHEQUEO: Si el bot está desactivado en este chat, no procesar más comandos
+        const botActive = await isBotActiveInChat(remoteJid);
+        if (!botActive) continue;
         // GENERAL HELP
         if (isGeneralHelp || cleanText === "!f1" || cleanText === "!f1 ayuda" || cleanText === "!f1 help") {
           await sock.sendMessage(remoteJid, { text: GENERAL_HELP_MESSAGE });
           continue;
         }
 
-        // LA PORRA DE F1 COMMANDS
+        // LA PORRA COMMANDS (F1 & MOTOGP)
         if (isPorra) {
           await sock.sendPresenceUpdate("composing", remoteJid);
           const senderJid = msg.key.participant || remoteJid;
-          const response = await handlePorraCommand(remoteJid, senderJid, pushName, rawText);
+          const defaultSport = cleanText.startsWith("!porramoto") ? "motogp" : undefined;
+          const response = await handlePorraCommand(remoteJid, senderJid, pushName, rawText, defaultSport);
 
           if (typeof response === "string") {
             await sock.sendMessage(remoteJid, { text: response });
 
             // Reacción automática con emoji al registrar pronóstico
             if (response.includes("¡PRONÓSTICO REGISTRADO!")) {
+              const isMoto = defaultSport === "motogp" || cleanText.includes("moto");
               try {
                 await sock.sendMessage(remoteJid, {
-                  react: { text: "🏎️", key: msg.key },
+                  react: { text: isMoto ? "🏍️" : "🏎️", key: msg.key },
                 });
               } catch (e: any) {
                 console.error("Error enviando reacción de emoji:", e?.message);

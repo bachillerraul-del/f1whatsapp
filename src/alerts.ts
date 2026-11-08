@@ -1,8 +1,8 @@
 import cron from "node-cron";
 import axios from "axios";
-import { getActiveSubscribers, wasAlertSent, markAlertSent, prisma } from "./db.js";
-import { getNextRace } from "./f1.js";
-import { getNextMotoGP } from "./motogp.js";
+import { getActiveSubscribers, wasAlertSent, markAlertSent, prisma, isBotActiveInChat } from "./db.js";
+import { getNextRace, getLastRaceResults } from "./f1.js";
+import { getNextMotoGP, getLastMotoGPResultsData, getLastMotoGPResults } from "./motogp.js";
 import { calculatePorraResults } from "./porra.js";
 import { ensureAIParticipants } from "./ai-participants.js";
 import type { WASocket } from "@whiskeysockets/baileys";
@@ -14,6 +14,9 @@ async function broadcastAlert(sock: WASocket, message: string) {
   const subscribers = await getActiveSubscribers();
   for (const sub of subscribers) {
     try {
+      // Respetar la configuración de bot activo/inactivo por chat
+      const active = await isBotActiveInChat(sub.jid);
+      if (!active) continue;
       await sock.sendMessage(sub.jid, { text: message });
     } catch (e: any) {
       console.error(`Error enviando alerta a ${sub.jid}:`, e?.message);
@@ -98,7 +101,7 @@ export function setupAlerts(sock: WASocket) {
 
               for (const sub of subscribers) {
                 try {
-                  const aiRes = await ensureAIParticipants(sub.jid, season, round, race.raceName, {
+                  const aiRes = await ensureAIParticipants("f1", sub.jid, season, round, race.raceName, {
                     force: true,
                     raceDateStr,
                   });
@@ -116,8 +119,8 @@ export function setupAlerts(sock: WASocket) {
                 `⏱️ La Clasificación (Qualy) comienza en 2 horas.\n\n` +
                 (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus estrategias tras analizar los entrenamientos libres.\n\n`) +
                 `👉 ¡Última oportunidad para enviar o modificar tu pronóstico!\n` +
-                `Usa: *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n` +
-                `_Ejemplo: !porra norris leclerc piastri P8 P5 (o DNF si crees que abandonan)_\n\n` +
+                `Usa: *!porra [1º] [2º] [3º] [4º] [5º] [DNF]*\n` +
+                `_Ejemplo: !porra ver nor lec pia rus dnf: ham_\n\n` +
                 `📊 Consulta todas las apuestas (incluyendo a las IAs) con *!porra ver*. ¡Que no se te pase! 🏁`;
               await broadcastAlert(sock, message);
               await markAlertSent(alertKey);
@@ -275,9 +278,10 @@ export function setupAlerts(sock: WASocket) {
           const hoursSinceRace = (now.getTime() - raceDate.getTime()) / (1000 * 60 * 60);
 
           if (hoursSinceRace >= 0 && hoursSinceRace <= 72) {
-            // Buscar todos los grupos que tengan apuestas registradas para este GP
+            // Buscar todos los grupos que tengan apuestas registradas para este GP de F1
             const distinctGroups = await prisma.porraBet.findMany({
               where: {
+                sport: "f1",
                 season,
                 round,
               },
@@ -286,11 +290,32 @@ export function setupAlerts(sock: WASocket) {
             });
 
             if (distinctGroups.length > 0) {
-              console.log(`🏆 [Auto-Resultados Porra] Enviando resultados a ${distinctGroups.length} grupo(s) para ${lastRace.raceName}`);
+              console.log(`🏆 [Auto-Resultados Porra F1] Enviando resultados a ${distinctGroups.length} grupo(s) para ${lastRace.raceName}`);
+
+              // Obtener resultados oficiales de la carrera
+              let raceResultsText = "";
+              try {
+                raceResultsText = await getLastRaceResults();
+              } catch (e: any) {
+                console.error("Error obteniendo resultados oficiales F1:", e?.message);
+              }
+
               for (const g of distinctGroups) {
                 try {
-                  const res = await calculatePorraResults(g.groupJid);
-                  const captionText = `📢 *¡RESULTADOS OFICIALES Y PODIO DE LA PORRA TRAS LA CARRERA!* 🏁\n\n` + res.text;
+                  // Respetar la configuración de bot activo/inactivo
+                  const active = await isBotActiveInChat(g.groupJid);
+                  if (!active) continue;
+
+                  // 1. Enviar primero los resultados oficiales de la carrera
+                  if (raceResultsText) {
+                    await sock.sendMessage(g.groupJid, {
+                      text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏎️\n\n${raceResultsText}`,
+                    });
+                  }
+
+                  // 2. Enviar resultados de la porra con podio
+                  const res = await calculatePorraResults(g.groupJid, "f1");
+                  const captionText = `📢 *¡RESULTADOS DE LA PORRA DE F1!* 🏆🏎️\n\n` + res.text;
                   if (res.imageBuffer) {
                     await sock.sendMessage(g.groupJid, {
                       image: res.imageBuffer,
@@ -302,7 +327,7 @@ export function setupAlerts(sock: WASocket) {
                     });
                   }
                 } catch (e: any) {
-                  console.error(`Error enviando resultados de porra a ${g.groupJid}:`, e?.message);
+                  console.error(`Error enviando resultados de porra F1 a ${g.groupJid}:`, e?.message);
                 }
               }
             }
@@ -315,6 +340,73 @@ export function setupAlerts(sock: WASocket) {
       }
     } catch (err: any) {
       console.error("[Cron Auto-Resultados Porra Error]:", err?.message);
+    }
+
+    // =========================================================
+    // 🏆 4. PUBLICACIÓN AUTOMÁTICA DE RESULTADOS DE MOTOGP
+    // =========================================================
+    try {
+      const motoData = await getLastMotoGPResultsData();
+      if (motoData && motoData.top5.length >= 5) {
+        const alertKey = `motogp-${motoData.season}-${motoData.round}-auto-porra-results`;
+        if (!(await wasAlertSent(alertKey))) {
+          const distinctGroups = await prisma.porraBet.findMany({
+            where: {
+              sport: "motogp",
+              season: motoData.season,
+              round: motoData.round,
+            },
+            select: { groupJid: true },
+            distinct: ["groupJid"],
+          });
+
+          if (distinctGroups.length > 0) {
+            console.log(`🏆 [Auto-Resultados Porra MotoGP] Enviando resultados a ${distinctGroups.length} grupo(s) para ${motoData.raceName}`);
+
+            // Obtener resultados oficiales de la carrera de MotoGP
+            let motoRaceResultsText = "";
+            try {
+              motoRaceResultsText = await getLastMotoGPResults();
+            } catch (e: any) {
+              console.error("Error obteniendo resultados oficiales MotoGP:", e?.message);
+            }
+
+            for (const g of distinctGroups) {
+              try {
+                // Respetar la configuración de bot activo/inactivo
+                const active = await isBotActiveInChat(g.groupJid);
+                if (!active) continue;
+
+                // 1. Enviar primero los resultados oficiales de la carrera
+                if (motoRaceResultsText) {
+                  await sock.sendMessage(g.groupJid, {
+                    text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏍️\n\n${motoRaceResultsText}`,
+                  });
+                }
+
+                // 2. Enviar resultados de la porra con podio
+                const res = await calculatePorraResults(g.groupJid, "motogp");
+                const captionText = `📢 *¡RESULTADOS DE LA PORRA DE MOTOGP!* 🏆🏍️\n\n` + res.text;
+                if (res.imageBuffer) {
+                  await sock.sendMessage(g.groupJid, {
+                    image: res.imageBuffer,
+                    caption: captionText,
+                  });
+                } else {
+                  await sock.sendMessage(g.groupJid, {
+                    text: captionText,
+                  });
+                }
+              } catch (e: any) {
+                console.error(`Error enviando resultados de porra MotoGP a ${g.groupJid}:`, e?.message);
+              }
+            }
+          }
+          await markAlertSent(alertKey);
+        }
+      }
+    } catch (err: any) {
+      console.error("[Cron Auto-Resultados Porra MotoGP Error]:", err?.message);
     }
   });
 

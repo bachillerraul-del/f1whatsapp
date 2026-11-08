@@ -44,3 +44,32 @@ export async function wasAlertSent(sessionKey: string) {
   });
   return !!alert;
 }
+
+// =============================
+// Chat Settings (bot on/off)
+// =============================
+
+export async function isBotActiveInChat(jid: string): Promise<boolean> {
+  const settings = await prisma.chatSettings.findUnique({
+    where: { jid },
+  });
+  // Por defecto el bot está activo si no hay registro
+  return settings?.botActive ?? true;
+}
+
+export async function setBotActiveInChat(jid: string, active: boolean) {
+  return prisma.chatSettings.upsert({
+    where: { jid },
+    update: { botActive: active },
+    create: { jid, botActive: active },
+  });
+}
+
+export async function getActiveChats(): Promise<string[]> {
+  // Devuelve los JIDs donde el bot está explícitamente desactivado
+  const disabled = await prisma.chatSettings.findMany({
+    where: { botActive: false },
+    select: { jid: true },
+  });
+  return disabled.map((c) => c.jid);
+}

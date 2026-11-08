@@ -5,9 +5,16 @@ import {
   type F1DriverDef,
   KNOWN_DRIVERS,
   findDriver,
-  parsePosOrDNF,
-  formatPos,
 } from "./f1-drivers.js";
+import {
+  type MotoGPRiderDef,
+  KNOWN_RIDERS,
+  findRider,
+} from "./motogp-riders.js";
+import {
+  getNextMotoGPEventInfo,
+  getLastMotoGPResultsData,
+} from "./motogp.js";
 import {
   ensureAIParticipants,
   checkAIPredictionWindow,
@@ -21,8 +28,9 @@ export {
   type F1DriverDef,
   KNOWN_DRIVERS,
   findDriver,
-  parsePosOrDNF,
-  formatPos,
+  type MotoGPRiderDef,
+  KNOWN_RIDERS,
+  findRider,
 };
 
 const JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1";
@@ -32,169 +40,223 @@ export interface PorraResultsResponse {
   imageBuffer?: Buffer | null;
 }
 
-export const PORRA_RULES_MESSAGE = `🏁 *LA PORRA DE F1* 🏎️🇪🇸\n` +
-  `━━━━━━━━━━━━━━━━━━━━━\n` +
-  `🎯 *Objetivo:* Acertar los pilotos que terminarán en *P4, P5 y P6*, además de las posiciones exactas de *Fernando Alonso* y *Carlos Sainz*.\n\n` +
-  `📋 *CÓMO JUGAR (Antes de la Qualy):*\n` +
-  `Envía tu pronóstico con el comando:\n` +
-  `👉 *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n\n` +
-  `*Ejemplos válidos:*\n` +
-  `🔹 *!porra norris leclerc piastri P8 P5*\n` +
-  `🔹 *!porra russell hamilton bearman DNF 7* _(¡Puedes apostar DNF si crees que abandona!)_\n` +
-  `🔹 *!porra alonso norris leclerc 4 7* _(¡Alonso/Sainz pueden estar en el Top 6!)_\n\n` +
-  `🤖 *COMPETIDORES IA (Gemini):*\n` +
-  `*Jarvis AI* y *Pitwall AI* compiten en el grupo con pronósticos calculados por IA.\n\n` +
-  `🏆 *SISTEMA DE PUNTUACIÓN (Máx 15 pts por GP):*\n` +
-  `🏎️ *P4, P5 y P6:*\n` +
-  `• *+3 pts* por cada piloto que aciertes en su posición exacta.\n\n` +
-  `🇪🇸 *Fernando Alonso y Carlos Sainz:*\n` +
-  `• *+3 pts* : Acierto exacto del puesto o acierto de *DNF* si abandona.\n` +
-  `• *+2 pts* : Si fallas por solo 1 puesto (ej: dijiste P8 y acaba P7 o P9).\n` +
-  `• *+1 pt*  : Si fallas por 2 puestos (ej: dijiste P8 y acaba P6 o P10).\n` +
-  `• *0 pts*  : Si la diferencia es de 3 puestos o más (o apostaste DNF y terminó).\n\n` +
-  `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
-  `🚫 *Regla anti-copia:* No puedes coincidir en más de 3 pronósticos con otro participante del grupo (máximo 3 coincidencias de 5).\n\n` +
-  `📊 *COMANDOS DISPONIBLES:*\n` +
-  `🔹 *!porra [apuesta]* : Enviar o modificar tu apuesta\n` +
-  `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
-  `🔹 *!porra ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
-  `🔹 *!porra ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
-  `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio de equipo tras la carrera\n` +
-  `🔹 *!porra tabla* : Clasificación general de la temporada`;
+export function getPorraRulesMessage(sport: "f1" | "motogp" = "f1"): string {
+  if (sport === "motogp") {
+    return `🏍️ *LA PORRA DE MOTOGP* 🏁\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (1º al 5º)* y *1 piloto que sufrirá DNF (abandono / caída)*.\n\n` +
+      `📋 *CÓMO JUGAR (Antes de la Qualy):*\n` +
+      `Envía tu pronóstico con:\n` +
+      `👉 *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF]*\n` +
+      `_(o también con !porramoto ...)_\n\n` +
+      `*Ejemplos válidos:*\n` +
+      `🔹 *!porra moto marquez martin bagnaia acosta bastianini dnf: binder*\n` +
+      `🔹 *!porramoto marquez martin bagnaia acosta bastianini binder*\n` +
+      `🔹 *!porra moto 1º marquez 2º martin 3º bagnaia 4º acosta 5º bastianini dnf mir*\n\n` +
+      `🤖 *COMPETIDORES IA (Gemini):*\n` +
+      `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando el rendimiento real de los pilotos.\n\n` +
+      `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
+      `• *+3 pts* : Por cada piloto acertado en su *posición exacta* del Top 5 (1º, 2º, 3º, 4º o 5º).\n` +
+      `• *+1 pt*  : Si el piloto termina en el *Top 5*, pero en una posición distinta a la que predijiste.\n` +
+      `• *+3 pts* : Si aciertas el piloto que sufre *DNF (abandono / caída)*.\n\n` +
+      `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
+      `🚫 *Reglas anti-copia:*\n` +
+      `• Máximo 4 aciertos exactos de coincidencia con otro participante (máx 4 de 6).\n` +
+      `• No se permite elegir los mismos 5 pilotos del Top 5 y el mismo DNF que otro jugador.\n\n` +
+      `📊 *COMANDOS DISPONIBLES:*\n` +
+      `🔹 *!porra moto [apuesta]* : Enviar o modificar tu apuesta\n` +
+      `🔹 *!porra moto analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
+      `🔹 *!porra moto ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
+      `🔹 *!porra moto ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
+      `🔹 *!porra moto resultados* : Calcular puntos, podio gráfico y radio tras la carrera\n` +
+      `🔹 *!porra moto historial* : Resumen de todos los GPs jugados en la temporada\n` +
+      `🔹 *!porra moto tabla* : Clasificación general de MotoGP`;
+  }
 
-interface ParsedPorra {
-  p4: F1DriverDef;
-  p5: F1DriverDef;
-  p6: F1DriverDef;
-  alonsoPos: number;
-  sainzPos: number;
+  return `🏁 *LA PORRA DE F1* 🏎️\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (P1 a P5)* y *1 piloto que sufrirá DNF (abandono)*.\n\n` +
+    `📋 *CÓMO JUGAR (Antes de la Qualy):*\n` +
+    `Envía tu pronóstico con:\n` +
+    `👉 *!porra [P1] [P2] [P3] [P4] [P5] [DNF]*\n\n` +
+    `*Ejemplos válidos:*\n` +
+    `🔹 *!porra ver nor lec pia rus dnf: ham*\n` +
+    `🔹 *!porra verstappen norris leclerc piastri russell hamilton*\n` +
+    `🔹 *!porra p1: ver p2: nor p3: lec p4: pia p5: rus dnf colapinto*\n\n` +
+    `🤖 *COMPETIDORES IA (Gemini):*\n` +
+    `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando la telemetría de libres.\n\n` +
+    `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
+    `• *+3 pts* : Por cada posición exacta acertada en el Top 5 (P1, P2, P3, P4 o P5).\n` +
+    `• *+1 pt*  : Si el piloto termina en el Top 5, pero en posición incorrecta.\n` +
+    `• *+3 pts* : Si aciertas el piloto que abandona la carrera (DNF).\n\n` +
+    `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
+    `🚫 *Reglas anti-copia:*\n` +
+    `• Máximo 4 posiciones exactas de coincidencia con otro participante (máx 4 de 6).\n` +
+    `• No se permite elegir los mismos 5 pilotos del Top 5 y el mismo DNF que otro jugador.\n\n` +
+    `📊 *COMANDOS DISPONIBLES:*\n` +
+    `🔹 *!porra [apuesta]* : Enviar o modificar tu apuesta\n` +
+    `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
+    `🔹 *!porra ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
+    `🔹 *!porra ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
+    `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio tras la carrera\n` +
+    `🔹 *!porra historial* : Resumen de todos los GPs jugados en la temporada\n` +
+    `🔹 *!porra tabla* : Clasificación general de la temporada\n\n` +
+    `💡 _Para MotoGP usa *!porra moto* o *!porramoto*._`;
 }
 
-export function parsePorraArgs(rawArgs: string[]): { parsed?: ParsedPorra; error?: string } {
-  // Unificar texto y quitar separadores comunes
-  const fullText = rawArgs.join(" ").replace(/[,;:]/g, " ").trim();
-  const tokens = fullText.split(/\s+/).filter(Boolean);
+export const PORRA_RULES_MESSAGE = getPorraRulesMessage("f1");
 
-  if (tokens.length < 5) {
+export interface DriverEntry {
+  id: string;
+  name: string;
+}
+
+export interface ParsedPorra {
+  p1: DriverEntry;
+  p2: DriverEntry;
+  p3: DriverEntry;
+  p4: DriverEntry;
+  p5: DriverEntry;
+  dnf: DriverEntry;
+}
+
+/**
+ * Interpreta los argumentos de la porra (Top 5 + DNF) tanto para F1 como para MotoGP
+ */
+export function parsePorraArgs(
+  rawArgs: string[],
+  sport: "f1" | "motogp" = "f1"
+): { parsed?: ParsedPorra; error?: string } {
+  const fullText = rawArgs.join(" ").replace(/[,;]/g, " ").trim();
+  if (!fullText) {
     return {
-      error: `❓ *Faltan datos en tu pronóstico.*\n\n` +
-        `Debes indicar los pilotos de P4, P5, P6 y los puestos de Alonso y Sainz (puesto 1-22 o DNF).\n` +
-        `👉 *Formato:* \`!porra [P4] [P5] [P6] [Alonso] [Sainz]\`\n` +
-        `👉 *Ejemplo:* \`!porra norris leclerc piastri P8 P5\` o \`!porra norris leclerc piastri DNF P7\``,
+      error: `❓ *Faltan datos en tu pronóstico de ${sport === "motogp" ? "MotoGP" : "F1"}.*\n\n` +
+        `Debes indicar los 5 pilotos para el Top 5 (1º al 5º) y 1 piloto para DNF (abandono).\n` +
+        `👉 *Formato:* \`!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]\`\n` +
+        `👉 *Ejemplo:* ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
     };
   }
 
-  // Caso 1: Exactamente 5 elementos posicionales (el formato más habitual)
-  if (tokens.length === 5) {
-    const d1 = findDriver(tokens[0]);
-    const d2 = findDriver(tokens[1]);
-    const d3 = findDriver(tokens[2]);
-    const n1 = parsePosOrDNF(tokens[3]);
-    const n2 = parsePosOrDNF(tokens[4]);
+  const finder = (q: string): DriverEntry | null => {
+    if (sport === "motogp") {
+      const r = findRider(q);
+      return r ? { id: r.id, name: r.name } : null;
+    } else {
+      const d = findDriver(q);
+      return d ? { id: d.id, name: d.name } : null;
+    }
+  };
 
-    if (d1 && d2 && d3 && n1 !== null && n2 !== null) {
-      if (d1.id === d2.id || d1.id === d3.id || d2.id === d3.id) {
-        return { error: `⚠️ No puedes repetir al mismo piloto en varias posiciones de P4, P5 o P6.` };
-      }
-      return {
-        parsed: {
-          p4: d1,
-          p5: d2,
-          p6: d3,
-          alonsoPos: n1,
-          sainzPos: n2,
-        },
-      };
+  let dnfDriver: DriverEntry | null = null;
+  let textWithoutDnf = fullText;
+
+  // 1. Detectar etiqueta explícita de DNF (ej: "dnf: ham", "dnf hamilton", "abandono: stroll", "caida binder")
+  const dnfRegex = /(?:dnf|abandono|ret|out|caida|caída)[:\s]+([a-zA-Z0-9_\-]+)/i;
+  const dnfMatch = textWithoutDnf.match(dnfRegex);
+  if (dnfMatch) {
+    const candidate = finder(dnfMatch[1]);
+    if (candidate) {
+      dnfDriver = candidate;
+      textWithoutDnf = textWithoutDnf.replace(dnfMatch[0], " ");
     }
   }
 
-  // Caso 2: Con etiquetas explícitas (alo, sainz, p4, p5, p6) o tokens desordenados
-  let p4: F1DriverDef | null = null;
-  let p5: F1DriverDef | null = null;
-  let p6: F1DriverDef | null = null;
-  let alonsoPos: number | null = null;
-  let sainzPos: number | null = null;
+  // 2. Extraer etiquetas posicionales explícitas (ej: p1: ver, 1º norris, etc.)
+  let p1: DriverEntry | null = null;
+  let p2: DriverEntry | null = null;
+  let p3: DriverEntry | null = null;
+  let p4: DriverEntry | null = null;
+  let p5: DriverEntry | null = null;
 
-  const remainingTokens: string[] = [];
+  const posRegex = /(?:p|pos|º|°)?([1-5])[:\sº°]+([a-zA-Z0-9_\-]+)/gi;
+  let posMatch: RegExpExecArray | null;
+  const matchedPositions = new Set<number>();
 
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i].toLowerCase();
-    const next = tokens[i + 1];
-
-    if ((t === "alo" || t === "alonso") && next && parsePosOrDNF(next) !== null) {
-      alonsoPos = parsePosOrDNF(next);
-      i++;
-      continue;
-    }
-    if ((t === "sai" || t === "sainz") && next && parsePosOrDNF(next) !== null) {
-      sainzPos = parsePosOrDNF(next);
-      i++;
-      continue;
-    }
-    if (t === "p4" && next && findDriver(next)) {
-      p4 = findDriver(next);
-      i++;
-      continue;
-    }
-    if (t === "p5" && next && findDriver(next)) {
-      p5 = findDriver(next);
-      i++;
-      continue;
-    }
-    if (t === "p6" && next && findDriver(next)) {
-      p6 = findDriver(next);
-      i++;
-      continue;
-    }
-
-    remainingTokens.push(tokens[i]);
-  }
-
-  // Completar los que falten con los tokens restantes
-  const driversFound: F1DriverDef[] = [];
-  const numbersFound: number[] = [];
-
-  for (const tok of remainingTokens) {
-    const num = parsePosOrDNF(tok);
-    const drv = findDriver(tok);
-    if (drv) {
-      driversFound.push(drv);
-    } else if (num !== null) {
-      numbersFound.push(num);
+  while ((posMatch = posRegex.exec(textWithoutDnf)) !== null) {
+    const posNum = parseInt(posMatch[1], 10);
+    const candidate = finder(posMatch[2]);
+    if (candidate && !matchedPositions.has(posNum)) {
+      matchedPositions.add(posNum);
+      if (posNum === 1) p1 = candidate;
+      else if (posNum === 2) p2 = candidate;
+      else if (posNum === 3) p3 = candidate;
+      else if (posNum === 4) p4 = candidate;
+      else if (posNum === 5) p5 = candidate;
     }
   }
 
-  if (!p4 && driversFound.length > 0) p4 = driversFound.shift()!;
-  if (!p5 && driversFound.length > 0) p5 = driversFound.shift()!;
-  if (!p6 && driversFound.length > 0) p6 = driversFound.shift()!;
-  if (alonsoPos === null && numbersFound.length > 0) alonsoPos = numbersFound.shift()!;
-  if (sainzPos === null && numbersFound.length > 0) sainzPos = numbersFound.shift()!;
+  // Limpiar tokens posicionales ya consumidos
+  if (matchedPositions.size > 0) {
+    textWithoutDnf = textWithoutDnf.replace(posRegex, " ");
+  }
 
-  if (!p4 || !p5 || !p6) {
+  // 3. Obtener tokens restantes
+  const tokens = textWithoutDnf.split(/\s+/).filter(Boolean);
+  const remainingDrivers: DriverEntry[] = [];
+
+  for (const tok of tokens) {
+    const cleanTok = tok.replace(/^(p[1-5]|dnf|1º|2º|3º|4º|5º)[:.]*/i, "");
+    const d = finder(cleanTok || tok);
+    if (d) {
+      remainingDrivers.push(d);
+    }
+  }
+
+  // Asignar los puestos vacantes
+  if (!p1 && remainingDrivers.length > 0) p1 = remainingDrivers.shift()!;
+  if (!p2 && remainingDrivers.length > 0) p2 = remainingDrivers.shift()!;
+  if (!p3 && remainingDrivers.length > 0) p3 = remainingDrivers.shift()!;
+  if (!p4 && remainingDrivers.length > 0) p4 = remainingDrivers.shift()!;
+  if (!p5 && remainingDrivers.length > 0) p5 = remainingDrivers.shift()!;
+
+  // Si no había DNF explícito y sobró un piloto, es el DNF
+  if (!dnfDriver && remainingDrivers.length > 0) {
+    dnfDriver = remainingDrivers.shift()!;
+  }
+
+  // Validar que tengamos los 5 puestos y el DNF
+  if (!p1 || !p2 || !p3 || !p4 || !p5) {
     return {
-      error: `❓ No se han podido identificar los 3 pilotos para P4, P5 y P6.\n\n` +
-        `Usa los apellidos o apodos comunes (ej: *norris*, *leclerc*, *piastri*, *russell*, *hamilton*, *verstappen*, etc.).`,
+      error: `❓ *Faltan posiciones en tu Top 5 de ${sport === "motogp" ? "MotoGP" : "F1"}.*\n\n` +
+        `Has indicado: 1º ${p1?.name || "❌"} | 2º ${p2?.name || "❌"} | 3º ${p3?.name || "❌"} | 4º ${p4?.name || "❌"} | 5º ${p5?.name || "❌"}\n` +
+        `👉 Debes elegir 5 pilotos distintos para el Top 5.\n` +
+        `👉 Ejemplo: ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
     };
   }
 
-  if (alonsoPos === null || sainzPos === null) {
+  if (!dnfDriver) {
     return {
-      error: `❓ Debes indicar dos puestos para Alonso y Sainz (número del 1 al 22, o *DNF* si crees que abandonará).\n\n` +
-        `Ejemplo: *P8 P5* o *DNF P7*.`,
+      error: `❓ *Falta indicar el piloto para DNF (abandono/caída).*\n\n` +
+        `Indica quién crees que no terminará la carrera.\n` +
+        `👉 Añade \`dnf: [piloto]\` al final de tu apuesta.\n` +
+        `👉 Ejemplo: ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
     };
   }
 
-  if (p4.id === p5.id || p4.id === p6.id || p5.id === p6.id) {
-    return { error: `⚠️ No puedes repetir al mismo piloto en varias posiciones de P4, P5 o P6.` };
+  // Validar duplicados en Top 5
+  const top5Ids = [p1.id, p2.id, p3.id, p4.id, p5.id];
+  const uniqueTop5 = new Set(top5Ids);
+  if (uniqueTop5.size < 5) {
+    return {
+      error: `⚠️ *No puedes repetir al mismo piloto en varias posiciones del Top 5.* Cada uno del 1º al 5º debe ser único.`,
+    };
+  }
+
+  // Validar que el DNF no esté en el Top 5
+  if (uniqueTop5.has(dnfDriver.id)) {
+    return {
+      error: `⚠️ *El piloto elegido como DNF (${dnfDriver.name}) no puede estar en tu Top 5.* Si termina en el Top 5 no habrá abandonado la carrera.`,
+    };
   }
 
   return {
     parsed: {
+      p1,
+      p2,
+      p3,
       p4,
       p5,
-      p6,
-      alonsoPos,
-      sainzPos,
+      dnf: dnfDriver,
     },
   };
 }
@@ -203,62 +265,99 @@ export async function handlePorraCommand(
   groupJid: string,
   userJid: string,
   userName: string,
-  commandText: string
+  commandText: string,
+  defaultSport?: "f1" | "motogp"
 ): Promise<string | PorraResultsResponse> {
   const parts = commandText.trim().split(/\s+/);
-  const subCommand = parts[1]?.toLowerCase();
+  let sport: "f1" | "motogp" = defaultSport || "f1";
+  let argIndex = 1;
+
+  if (parts[0]?.toLowerCase().startsWith("!porramoto")) {
+    sport = "motogp";
+    argIndex = 1;
+  } else if (parts[1]?.toLowerCase() === "moto" || parts[1]?.toLowerCase() === "motogp") {
+    sport = "motogp";
+    argIndex = 2;
+  }
+
+  const subCommand = parts[argIndex]?.toLowerCase();
 
   // 1. Ayuda / Reglas
   if (!subCommand || subCommand === "ayuda" || subCommand === "help" || subCommand === "reglas") {
-    return PORRA_RULES_MESSAGE;
+    return getPorraRulesMessage(sport);
   }
 
   // 2. Ver apuestas registradas del grupo
   if (subCommand === "ver" || subCommand === "apuestas" || subCommand === "lista" || subCommand === "apuesta") {
-    return showGroupBets(groupJid);
+    return showGroupBets(groupJid, sport);
   }
 
   // 3. Ver clasificación general de la temporada
   if (subCommand === "tabla" || subCommand === "ranking" || subCommand === "clasificacion" || subCommand === "puntos") {
-    return showSeasonRanking(groupJid);
+    return showSeasonRanking(groupJid, sport);
+  }
+
+  // 3b. Historial de GPs jugados
+  if (subCommand === "historial" || subCommand === "historia" || subCommand === "gps" || subCommand === "temporada") {
+    return showGPHistorial(groupJid, sport);
   }
 
   // 4. Calcular resultados y podio del GP
   if (subCommand === "resultados" || subCommand === "resultado" || subCommand === "calcular" || subCommand === "ganador") {
-    return calculatePorraResults(groupJid);
+    return calculatePorraResults(groupJid, sport);
   }
 
   // 5. Invocar o consultar pronósticos de la IA (Jarvis AI & Pitwall AI)
   if (subCommand === "ia" || subCommand === "ai" || subCommand === "jarvis" || subCommand === "pitwall") {
     try {
-      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
-      if (!race) return "⚠️ No hay información de la próxima carrera disponible.";
-      const season = parseInt(race.season, 10);
-      const round = parseInt(race.round, 10);
-      const raceName = race.raceName || `GP Ronda ${round}`;
+      let season = new Date().getFullYear();
+      let round = 1;
+      let raceName = "Próximo Gran Premio";
+      let qualyDate: Date | undefined;
+      let raceDateStr: string | undefined;
 
-      const windowStatus = checkAIPredictionWindow(race);
+      if (sport === "motogp") {
+        const info = await getNextMotoGPEventInfo();
+        if (!info) return "⚠️ No hay información del próximo evento de MotoGP disponible.";
+        season = info.season;
+        round = info.round;
+        raceName = info.raceName;
+        qualyDate = info.qualyDate;
+        raceDateStr = info.raceDate?.toISOString();
+      } else {
+        const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
+        const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+        if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
+        season = parseInt(race.season, 10);
+        round = parseInt(race.round, 10);
+        raceName = race.raceName || `GP Ronda ${round}`;
+        if (race.Qualifying?.date) {
+          qualyDate = new Date(`${race.Qualifying.date}T${race.Qualifying.time || "14:00:00Z"}`);
+        }
+        raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+      }
+
+      const windowStatus = checkAIPredictionWindow({ qualyDate, raceName });
       const isForced = parts.some((p) => ["forzar", "force", "test", "simular"].includes(p.toLowerCase()));
 
       if (windowStatus.isClosed) {
         return `🔒 *APUESTAS DE LA IA CERRADAS* 🏁\n` +
-          `La Clasificación del *${raceName}* ya ha comenzado. Consulta las apuestas registradas con *!porra ver*.`;
+          `La Clasificación del *${raceName}* ya ha comenzado. Consulta las apuestas registradas con *!porra${sport === "motogp" ? " moto" : ""} ver*.`;
       }
 
       if (!windowStatus.isOpen && !isForced) {
-        return getAIPendingMessage(race, windowStatus.diffMinutes);
+        return getAIPendingMessage({ raceName, qualyDate }, windowStatus.diffMinutes, sport);
       }
 
-      // Si está en la ventana de 2h o se ha forzado modo simulación/test:
-      const aiRes = await ensureAIParticipants(groupJid, season, round, raceName, {
+      // Dentro de las 2h o forzado
+      const aiRes = await ensureAIParticipants(sport, groupJid, season, round, raceName, {
         force: isForced,
-        raceDateStr: race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined,
+        raceDateStr,
       });
 
       if (isForced) {
-        return `⚠️ *[MODO SIMULACIÓN / TEST PREVIO ACTIVADO]*\n` +
-          `_Nota: Los libres aún no han terminado, pronóstico de prueba:_\n\n${aiRes.text}`;
+        return `⚠️ *[MODO SIMULACIÓN / TEST PREVIO ACTIVADO (${sport.toUpperCase()})]*\n` +
+          `_Nota: Pronóstico generado en modo prueba:_\n\n${aiRes.text}`;
       }
       return aiRes.text;
     } catch (err: any) {
@@ -270,38 +369,57 @@ export async function handlePorraCommand(
   // 6. INTERACCIÓN PREVIA: Analizar o auditar una apuesta con Jarvis AI y Pitwall AI
   if (subCommand === "analizar" || subCommand === "auditar" || subCommand === "opinar" || subCommand === "roast") {
     try {
-      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
-      if (!race) return "⚠️ No hay información de la próxima carrera disponible.";
-      const season = parseInt(race.season, 10);
-      const round = parseInt(race.round, 10);
-      const raceName = race.raceName || `GP Ronda ${round}`;
-      const raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+      let season = new Date().getFullYear();
+      let round = 1;
+      let raceName = "Gran Premio";
+      let raceDateStr: string | undefined;
 
-      const analyzeArgs = parts.slice(2);
+      if (sport === "motogp") {
+        const info = await getNextMotoGPEventInfo();
+        if (!info) return "⚠️ No hay información del próximo evento de MotoGP disponible.";
+        season = info.season;
+        round = info.round;
+        raceName = info.raceName;
+        raceDateStr = info.raceDate?.toISOString();
+      } else {
+        const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
+        const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+        if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
+        season = parseInt(race.season, 10);
+        round = parseInt(race.round, 10);
+        raceName = race.raceName || `GP Ronda ${round}`;
+        raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+      }
+
+      const analyzeArgs = parts.slice(argIndex + 1);
       let betToAnalyze: any = null;
 
       if (analyzeArgs.length > 0) {
-        const { parsed, error } = parsePorraArgs(analyzeArgs);
+        const { parsed, error } = parsePorraArgs(analyzeArgs, sport);
         if (error || !parsed) {
           return error || "⚠️ No se pudo interpretar la apuesta a analizar.";
         }
         betToAnalyze = {
           userName,
+          sport,
+          p1Name: parsed.p1.name,
+          p1Driver: parsed.p1.id,
+          p2Name: parsed.p2.name,
+          p2Driver: parsed.p2.id,
+          p3Name: parsed.p3.name,
+          p3Driver: parsed.p3.id,
           p4Name: parsed.p4.name,
           p4Driver: parsed.p4.id,
           p5Name: parsed.p5.name,
           p5Driver: parsed.p5.id,
-          p6Name: parsed.p6.name,
-          p6Driver: parsed.p6.id,
-          alonsoPos: parsed.alonsoPos,
-          sainzPos: parsed.sainzPos,
+          dnfName: parsed.dnf.name,
+          dnfDriver: parsed.dnf.id,
         };
       } else {
-        // Buscar la apuesta registrada del usuario en la base de datos
         const userBet = await prisma.porraBet.findUnique({
           where: {
-            groupJid_season_round_userJid: {
+            sport_groupJid_season_round_userJid: {
+              sport,
               groupJid,
               season,
               round,
@@ -311,11 +429,11 @@ export async function handlePorraCommand(
         });
 
         if (!userBet) {
-          return `❓ *No tienes ninguna apuesta registrada aún para el ${raceName}*.\n\n` +
+          return `❓ *No tienes ninguna apuesta registrada aún para el ${raceName} (${sport.toUpperCase()})*.\n\n` +
             `👉 Envía primero tu apuesta con:\n` +
-            `*!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n\n` +
-            `O analiza una idea al instante escribiendo:\n` +
-            `*!porra analizar norris leclerc piastri P8 P5*`;
+            `*!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]*\n\n` +
+            `O analiza una idea escribiendo:\n` +
+            `*!porra${sport === "motogp" ? " moto" : ""} analizar [1º] [2º] [3º] [4º] [5º] [DNF]*`;
         }
         betToAnalyze = userBet;
       }
@@ -327,53 +445,67 @@ export async function handlePorraCommand(
     }
   }
 
-  // 7. Registrar apuesta humana
-  const betArgs = parts.slice(1);
-  return registerPorraBet(groupJid, userJid, userName, betArgs);
+  // 7. Registrar apuesta de usuario
+  const betArgs = parts.slice(argIndex);
+  return registerPorraBet(sport, groupJid, userJid, userName, betArgs);
 }
 
 async function registerPorraBet(
+  sport: "f1" | "motogp",
   groupJid: string,
   userJid: string,
   userName: string,
   args: string[]
 ): Promise<string> {
-  const { parsed, error } = parsePorraArgs(args);
+  const { parsed, error } = parsePorraArgs(args, sport);
   if (error || !parsed) {
     return error || "⚠️ Error al interpretar la apuesta.";
   }
 
-  // Consultar próximo GP
-  let race: any = null;
-  try {
-    const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-    race = nextRes.data.MRData?.RaceTable?.Races?.[0];
-  } catch (err: any) {
-    console.error("Error consultando próximo GP:", err?.message);
-    return "⚠️ Error al conectar con la API de F1. Por favor intenta de nuevo en unos instantes.";
-  }
+  let season = new Date().getFullYear();
+  let round = 1;
+  let raceName = "Gran Premio";
+  let qualyDate: Date | undefined;
 
-  if (!race) {
-    return "⚠️ No hay información de la próxima carrera disponible en este momento.";
-  }
-
-  const season = parseInt(race.season, 10);
-  const round = parseInt(race.round, 10);
-  const raceName = race.raceName || `GP Ronda ${round}`;
-
-  // Verificar límite de tiempo: Debe ser ANTES de la Clasificación (Qualifying / Q1)
-  const now = new Date();
-  if (race.Qualifying?.date) {
-    const qualyTime = race.Qualifying.time || "14:00:00Z";
-    const qualyDate = new Date(`${race.Qualifying.date}T${qualyTime}`);
-    if (now >= qualyDate) {
-      return `🔒 *¡APUESTAS CERRADAS!* La Clasificación del *${raceName}* ya ha comenzado. Ya no se pueden enviar ni modificar pronósticos para este Gran Premio.`;
+  if (sport === "motogp") {
+    const info = await getNextMotoGPEventInfo();
+    if (!info) {
+      return "⚠️ No hay información del próximo evento de MotoGP disponible.";
+    }
+    season = info.season;
+    round = info.round;
+    raceName = info.raceName;
+    qualyDate = info.qualyDate;
+  } else {
+    try {
+      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
+      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+      if (!race) {
+        return "⚠️ No hay información de la próxima carrera de F1 disponible.";
+      }
+      season = parseInt(race.season, 10);
+      round = parseInt(race.round, 10);
+      raceName = race.raceName || `GP Ronda ${round}`;
+      if (race.Qualifying?.date) {
+        const qualyTime = race.Qualifying.time || "14:00:00Z";
+        qualyDate = new Date(`${race.Qualifying.date}T${qualyTime}`);
+      }
+    } catch (err: any) {
+      console.error("Error consultando próximo GP F1:", err?.message);
+      return "⚠️ Error al conectar con la API de F1. Intenta de nuevo en unos momentos.";
     }
   }
 
-  // Comprobar regla anti-copia: no coincidir en más de 3 pronósticos con otro jugador del grupo
+  // Comprobar límite de tiempo: Debe ser ANTES de la Clasificación (Qualy)
+  const now = new Date();
+  if (qualyDate && now >= qualyDate) {
+    return `🔒 *¡APUESTAS CERRADAS!* La Clasificación del *${raceName}* ya ha comenzado. Ya no se pueden enviar ni modificar pronósticos para este Gran Premio.`;
+  }
+
+  // REGLAS ANTI-COPIA
   const otherBets = await prisma.porraBet.findMany({
     where: {
+      sport,
       groupJid,
       season,
       round,
@@ -381,45 +513,64 @@ async function registerPorraBet(
     },
   });
 
+  const currentTop5Set = new Set([parsed.p1.id, parsed.p2.id, parsed.p3.id, parsed.p4.id, parsed.p5.id]);
+
   for (const other of otherBets) {
-    let matches = 0;
+    let exactMatches = 0;
     const matchDetails: string[] = [];
 
+    if (other.p1Driver === parsed.p1.id) {
+      exactMatches++;
+      matchDetails.push(`1º: ${parsed.p1.name}`);
+    }
+    if (other.p2Driver === parsed.p2.id) {
+      exactMatches++;
+      matchDetails.push(`2º: ${parsed.p2.name}`);
+    }
+    if (other.p3Driver === parsed.p3.id) {
+      exactMatches++;
+      matchDetails.push(`3º: ${parsed.p3.name}`);
+    }
     if (other.p4Driver === parsed.p4.id) {
-      matches++;
-      matchDetails.push(`P4: ${parsed.p4.name}`);
+      exactMatches++;
+      matchDetails.push(`4º: ${parsed.p4.name}`);
     }
     if (other.p5Driver === parsed.p5.id) {
-      matches++;
-      matchDetails.push(`P5: ${parsed.p5.name}`);
+      exactMatches++;
+      matchDetails.push(`5º: ${parsed.p5.name}`);
     }
-    if (other.p6Driver === parsed.p6.id) {
-      matches++;
-      matchDetails.push(`P6: ${parsed.p6.name}`);
-    }
-    if (other.alonsoPos === parsed.alonsoPos) {
-      matches++;
-      matchDetails.push(`Alonso: ${formatPos(parsed.alonsoPos)}`);
-    }
-    if (other.sainzPos === parsed.sainzPos) {
-      matches++;
-      matchDetails.push(`Sainz: ${formatPos(parsed.sainzPos)}`);
+    if (other.dnfDriver === parsed.dnf.id) {
+      exactMatches++;
+      matchDetails.push(`DNF: ${parsed.dnf.name}`);
     }
 
-    if (matches > 3) {
+    // Regla 1: Máximo 4 aciertos exactos de 6 (si tiene 5 o 6 coincidencias exactas, se rechaza)
+    if (exactMatches > 4) {
       return `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIA!* 🚫\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Por reglamento, *no puedes copiar más de 3 pronósticos* de otro participante.\n\n` +
-        `Coincides en *${matches} de 5* predicciones con *${other.userName}*:\n` +
+        `Por reglamento anti-copia, *no puedes coincidir en más de 4 pronósticos exactos* con otro participante del grupo (máximo 4 de 6).\n\n` +
+        `Coincides en *${exactMatches} de 6* predicciones con *${other.userName}*:\n` +
         `• ${matchDetails.join("\n• ")}\n\n` +
-        `👉 Modifica al menos ${matches - 3} predicción(es) para diferenciar tu apuesta.`;
+        `👉 Modifica al menos ${exactMatches - 4} predicción(es) para diferenciar tu apuesta.`;
+    }
+
+    // Regla 2: Mismo Top 5 en cualquier orden + mismo DNF
+    const otherTop5Set = new Set([other.p1Driver, other.p2Driver, other.p3Driver, other.p4Driver, other.p5Driver]);
+    const sameTop5Members = [...currentTop5Set].every((id) => otherTop5Set.has(id));
+
+    if (sameTop5Members && other.dnfDriver === parsed.dnf.id) {
+      return `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIA!* 🚫\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `No puedes seleccionar exactamente los *mismos 5 pilotos del Top 5* y el *mismo DNF* que *${other.userName}*, incluso si alteras su orden.\n\n` +
+        `👉 Cambia al menos un piloto de tu Top 5 o tu piloto de DNF para crear un pronóstico diferenciado.`;
     }
   }
 
-  // Guardar o actualizar apuesta en la BD
+  // Guardar en Base de Datos
   await prisma.porraBet.upsert({
     where: {
-      groupJid_season_round_userJid: {
+      sport_groupJid_season_round_userJid: {
+        sport,
         groupJid,
         season,
         round,
@@ -427,98 +578,122 @@ async function registerPorraBet(
       },
     },
     create: {
+      sport,
       groupJid,
       userJid,
       userName,
       season,
       round,
       raceName,
+      p1Driver: parsed.p1.id,
+      p1Name: parsed.p1.name,
+      p2Driver: parsed.p2.id,
+      p2Name: parsed.p2.name,
+      p3Driver: parsed.p3.id,
+      p3Name: parsed.p3.name,
       p4Driver: parsed.p4.id,
       p4Name: parsed.p4.name,
       p5Driver: parsed.p5.id,
       p5Name: parsed.p5.name,
-      p6Driver: parsed.p6.id,
-      p6Name: parsed.p6.name,
-      alonsoPos: parsed.alonsoPos,
-      sainzPos: parsed.sainzPos,
+      dnfDriver: parsed.dnf.id,
+      dnfName: parsed.dnf.name,
     },
     update: {
       userName,
       raceName,
+      p1Driver: parsed.p1.id,
+      p1Name: parsed.p1.name,
+      p2Driver: parsed.p2.id,
+      p2Name: parsed.p2.name,
+      p3Driver: parsed.p3.id,
+      p3Name: parsed.p3.name,
       p4Driver: parsed.p4.id,
       p4Name: parsed.p4.name,
       p5Driver: parsed.p5.id,
       p5Name: parsed.p5.name,
-      p6Driver: parsed.p6.id,
-      p6Name: parsed.p6.name,
-      alonsoPos: parsed.alonsoPos,
-      sainzPos: parsed.sainzPos,
+      dnfDriver: parsed.dnf.id,
+      dnfName: parsed.dnf.name,
       points: null,
       breakdown: null,
     },
   });
 
-  return `✅ *¡PRONÓSTICO REGISTRADO!* 🏁🏎️\n` +
+  const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
+  return `✅ *¡PRONÓSTICO REGISTRADO!* 🏁${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `👤 *Participante:* ${userName}\n` +
-    `🏆 *Gran Premio:* ${raceName}\n\n` +
+    `🏆 *Gran Premio:* ${raceName} (${sport.toUpperCase()})\n\n` +
     `🎯 *Tus predicciones:*\n` +
-    `• *P4:* ${parsed.p4.name}\n` +
-    `• *P5:* ${parsed.p5.name}\n` +
-    `• *P6:* ${parsed.p6.name}\n` +
-    `• 🇪🇸 *Fernando Alonso:* ${formatPos(parsed.alonsoPos)}\n` +
-    `• 🇪🇸 *Carlos Sainz:* ${formatPos(parsed.sainzPos)}\n` +
+    `• *1º:* ${parsed.p1.name}\n` +
+    `• *2º:* ${parsed.p2.name}\n` +
+    `• *3º:* ${parsed.p3.name}\n` +
+    `• *4:* ${parsed.p4.name}\n` +
+    `• *5º:* ${parsed.p5.name}\n` +
+    `• 💥 *DNF (Abandono):* ${parsed.dnf.name}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `💡 _Puedes consultar todas las apuestas del grupo con *!porra ver*._`;
+    `💡 _Consulta todas las apuestas del grupo con *!porra${sport === "motogp" ? " moto" : ""} ver*._`;
 }
 
-async function showGroupBets(groupJid: string): Promise<string> {
-  let race: any = null;
-  try {
-    const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-    race = nextRes.data.MRData?.RaceTable?.Races?.[0];
-  } catch (err: any) {
-    console.error("Error consultando próximo GP:", err?.message);
-    return "⚠️ Error al conectar con la API de F1.";
+export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "f1"): Promise<string> {
+  let season = new Date().getFullYear();
+  let round = 1;
+  let raceName = "Gran Premio";
+  let qualyDate: Date | undefined;
+  let raceDateStr: string | undefined;
+
+  if (sport === "motogp") {
+    const info = await getNextMotoGPEventInfo();
+    if (!info) return "⚠️ No hay información del próximo Gran Premio de MotoGP disponible.";
+    season = info.season;
+    round = info.round;
+    raceName = info.raceName;
+    qualyDate = info.qualyDate;
+    raceDateStr = info.raceDate?.toISOString();
+  } else {
+    try {
+      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
+      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+      if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
+      season = parseInt(race.season, 10);
+      round = parseInt(race.round, 10);
+      raceName = race.raceName || `GP Ronda ${round}`;
+      if (race.Qualifying?.date) {
+        qualyDate = new Date(`${race.Qualifying.date}T${race.Qualifying.time || "14:00:00Z"}`);
+      }
+      raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+    } catch (err: any) {
+      console.error("Error consultando próximo GP F1:", err?.message);
+      return "⚠️ Error al conectar con la API de F1.";
+    }
   }
 
-  if (!race) {
-    return "⚠️ No hay información de la próxima carrera disponible.";
-  }
-
-  const season = parseInt(race.season, 10);
-  const round = parseInt(race.round, 10);
-  const raceName = race.raceName || `GP Ronda ${round}`;
-
-  const windowStatus = checkAIPredictionWindow(race);
+  const windowStatus = checkAIPredictionWindow({ qualyDate, raceName });
 
   if (windowStatus.isOpen) {
-    // Si estamos dentro de las 2 horas previas a la Qualy, asegurar que las IAs participen con datos de libres
     try {
-      await ensureAIParticipants(groupJid, season, round, raceName, {
-        raceDateStr: race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined,
-      });
+      await ensureAIParticipants(sport, groupJid, season, round, raceName, { raceDateStr });
     } catch (err: any) {
       console.error("Error asegurando IAs en showGroupBets:", err?.message);
     }
   } else if (!windowStatus.isClosed) {
-    // Si aún faltan más de 2 horas (días u horas antes), limpiar apuestas prematuras de la IA
     try {
       await prisma.porraBet.deleteMany({
         where: {
+          sport,
           groupJid,
           season,
           round,
           userJid: { in: [AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id] },
         },
       });
-    } catch (err: any) {
+    } catch {
       // omit
     }
   }
 
   const bets = await prisma.porraBet.findMany({
     where: {
+      sport,
       groupJid,
       season,
       round,
@@ -526,67 +701,103 @@ async function showGroupBets(groupJid: string): Promise<string> {
     orderBy: { createdAt: "asc" },
   });
 
+  const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
+
   if (bets.length === 0) {
-    let emptyMsg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁\n` +
+    let emptyMsg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁${sportIcon}\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `_Aún no hay apuestas registradas en este grupo._\n\n` +
+      `_Aún no hay apuestas registradas en este grupo para ${sport.toUpperCase()}._\n\n` +
       `👉 ¡Sé el primero en enviar tu pronóstico!\n` +
-      `Usa: *!porra [P4] [P5] [P6] [Alonso] [Sainz]*\n` +
-      `Ejemplo: *!porra norris leclerc piastri P8 P5*`;
+      `Usa: *!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]*`;
 
     if (!windowStatus.isOpen && !windowStatus.isClosed) {
-      emptyMsg += `\n\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy (tras analizar FP1, FP2 y FP3)._`;
+      emptyMsg += `\n\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy tras analizar los entrenamientos._`;
     }
     return emptyMsg;
   }
 
-  let msg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁\n` +
+  let msg = `📋 *PRONÓSTICOS REGISTRADOS - ${raceName.toUpperCase()}* 🏁${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   for (const bet of bets) {
     msg += `👤 *${bet.userName}:*\n` +
-      `  • P4: ${bet.p4Name} | P5: ${bet.p5Name} | P6: ${bet.p6Name}\n` +
-      `  • 🇪🇸 Alo: ${formatPos(bet.alonsoPos)} | Sai: ${formatPos(bet.sainzPos)}\n\n`;
+      `  • 1º: ${bet.p1Name} | 2º: ${bet.p2Name} | 3º: ${bet.p3Name}\n` +
+      `  • 4º: ${bet.p4Name} | 5º: ${bet.p5Name}\n` +
+      `  • 💥 DNF: ${bet.dnfName}\n\n`;
   }
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
     `Total: *${bets.length}* participante(s).\n` +
-    `🔒 Cierre de apuestas: inicio de la Qualy.`;
+    `🔒 Cierre de apuestas: inicio de la Clasificación (Qualy).`;
 
   if (!windowStatus.isOpen && !windowStatus.isClosed) {
-    msg += `\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy (tras analizar FP1, FP2 y FP3)._`;
+    msg += `\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy._`;
   }
 
   return msg;
 }
 
-export async function calculatePorraResults(groupJid: string): Promise<PorraResultsResponse> {
-  let race: any = null;
-  try {
-    const lastRes = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 8000 });
-    race = lastRes.data.MRData?.RaceTable?.Races?.[0];
-  } catch (err: any) {
-    console.error("Error consultando resultados del último GP:", err?.message);
-    return { text: "⚠️ Error al obtener los resultados oficiales de la carrera." };
+export async function calculatePorraResults(
+  groupJid: string,
+  sport: "f1" | "motogp" = "f1"
+): Promise<PorraResultsResponse> {
+  let season = new Date().getFullYear();
+  let round = 1;
+  let raceName = "Gran Premio";
+  let top5Official: DriverEntry[] = [];
+  let officialDnfs: DriverEntry[] = [];
+
+  if (sport === "motogp") {
+    const motoData = await getLastMotoGPResultsData();
+    if (!motoData || motoData.top5.length < 5) {
+      return { text: "⚠️ No se encontraron resultados oficiales completos para la última carrera de MotoGP." };
+    }
+    season = motoData.season;
+    round = motoData.round;
+    raceName = motoData.raceName;
+    top5Official = motoData.top5;
+    officialDnfs = motoData.dnfs;
+  } else {
+    try {
+      const lastRes = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 8000 });
+      const race = lastRes.data.MRData?.RaceTable?.Races?.[0];
+      if (!race || !race.Results || race.Results.length < 5) {
+        return { text: "⚠️ No se encontraron resultados oficiales completos para la última carrera de F1." };
+      }
+      season = parseInt(race.season, 10);
+      round = parseInt(race.round, 10);
+      raceName = race.raceName || `GP Ronda ${round}`;
+
+      const results = race.Results;
+      top5Official = results.slice(0, 5).map((r: any) => ({
+        id: r.Driver.driverId,
+        name: `${r.Driver.givenName} ${r.Driver.familyName}`,
+      }));
+
+      officialDnfs = results.filter((r: any) => {
+        const posText = r.positionText;
+        const status = (r.status || "").toLowerCase();
+        return posText === "R" || (!status.includes("lap") && status !== "finished");
+      }).map((r: any) => ({
+        id: r.Driver.driverId,
+        name: `${r.Driver.givenName} ${r.Driver.familyName}`,
+      }));
+    } catch (err: any) {
+      console.error("Error consultando resultados oficiales F1:", err?.message);
+      return { text: "⚠️ Error al obtener los resultados oficiales de la carrera de F1." };
+    }
   }
 
-  if (!race || !race.Results || race.Results.length < 6) {
-    return { text: "⚠️ No se encontraron resultados oficiales completos para la última carrera." };
-  }
-
-  const season = parseInt(race.season, 10);
-  const round = parseInt(race.round, 10);
-  const raceName = race.raceName || `GP Ronda ${round}`;
-
-  // Asegurar que las IAs participan en este grupo
+  // Asegurar que las IAs participan en este grupo si no lo habían hecho
   try {
-    await ensureAIParticipants(groupJid, season, round, raceName);
+    await ensureAIParticipants(sport, groupJid, season, round, raceName);
   } catch (err: any) {
-    console.error("Error asegurando IAs en showGroupBets:", err?.message);
+    console.error("Error asegurando IAs en calculatePorraResults:", err?.message);
   }
 
   const bets = await prisma.porraBet.findMany({
     where: {
+      sport,
       groupJid,
       season,
       round,
@@ -594,34 +805,12 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
   });
 
   if (bets.length === 0) {
-    return { text: `ℹ️ No se registraron apuestas en este grupo para el *${raceName}*.` };
+    return { text: `ℹ️ No se registraron apuestas en este grupo para el *${raceName}* (${sport.toUpperCase()}).` };
   }
 
-  // Resultados oficiales reales
-  const results = race.Results;
-  const p4Official = {
-    id: results[3].Driver.driverId,
-    name: `${results[3].Driver.givenName} ${results[3].Driver.familyName}`,
-  };
-  const p5Official = {
-    id: results[4].Driver.driverId,
-    name: `${results[4].Driver.givenName} ${results[4].Driver.familyName}`,
-  };
-  const p6Official = {
-    id: results[5].Driver.driverId,
-    name: `${results[5].Driver.givenName} ${results[5].Driver.familyName}`,
-  };
+  const top5Ids = top5Official.map((d) => d.id);
+  const dnfIds = new Set(officialDnfs.map((d) => d.id));
 
-  const aloDriver = results.find((d: any) => d.Driver.driverId === "alonso");
-  const saiDriver = results.find((d: any) => d.Driver.driverId === "sainz");
-
-  const isAloDnf = aloDriver ? (aloDriver.positionText === "R" || (aloDriver.status !== "Finished" && !aloDriver.status.toLowerCase().includes("lap"))) : true;
-  const isSaiDnf = saiDriver ? (saiDriver.positionText === "R" || (saiDriver.status !== "Finished" && !saiDriver.status.toLowerCase().includes("lap"))) : true;
-
-  const aloOfficialPos = aloDriver ? parseInt(aloDriver.position, 10) : 22;
-  const saiOfficialPos = saiDriver ? parseInt(saiDriver.position, 10) : 22;
-
-  // Evaluar a cada usuario
   interface EvaluatedUser {
     id: string;
     userName: string;
@@ -636,71 +825,34 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
     let pts = 0;
     const details: string[] = [];
 
-    // P4
-    if (bet.p4Driver === p4Official.id) {
-      pts += 3;
-      details.push(`+3 P4 (${bet.p4Name})`);
-    }
+    const positions = [
+      { pos: 1, driverId: bet.p1Driver, driverName: bet.p1Name, official: top5Official[0] },
+      { pos: 2, driverId: bet.p2Driver, driverName: bet.p2Name, official: top5Official[1] },
+      { pos: 3, driverId: bet.p3Driver, driverName: bet.p3Name, official: top5Official[2] },
+      { pos: 4, driverId: bet.p4Driver, driverName: bet.p4Name, official: top5Official[3] },
+      { pos: 5, driverId: bet.p5Driver, driverName: bet.p5Name, official: top5Official[4] },
+    ];
 
-    // P5
-    if (bet.p5Driver === p5Official.id) {
-      pts += 3;
-      details.push(`+3 P5 (${bet.p5Name})`);
-    }
-
-    // P6
-    if (bet.p6Driver === p6Official.id) {
-      pts += 3;
-      details.push(`+3 P6 (${bet.p6Name})`);
-    }
-
-    // Alonso
-    if (bet.alonsoPos === 0) {
-      if (isAloDnf) {
+    for (const item of positions) {
+      if (item.driverId === item.official.id) {
         pts += 3;
-        details.push(`+3 Alo DNF acertado`);
-      } else {
-        details.push(`+0 Alo (pusiste DNF pero acabó P${aloOfficialPos})`);
-      }
-    } else {
-      const diffAlo = Math.abs(bet.alonsoPos - aloOfficialPos);
-      if (diffAlo === 0) {
-        pts += 3;
-        details.push(`+3 Alo exacto (P${bet.alonsoPos})`);
-      } else if (diffAlo === 1) {
-        pts += 2;
-        details.push(`+2 Alo dif 1 (pusiste P${bet.alonsoPos}, fue P${aloOfficialPos})`);
-      } else if (diffAlo === 2) {
+        details.push(`+3 P${item.pos} exacto (${item.driverName})`);
+      } else if (top5Ids.includes(item.driverId)) {
         pts += 1;
-        details.push(`+1 Alo dif 2 (pusiste P${bet.alonsoPos}, fue P${aloOfficialPos})`);
+        details.push(`+1 Top5 (${item.driverName})`);
       }
     }
 
-    // Sainz
-    if (bet.sainzPos === 0) {
-      if (isSaiDnf) {
-        pts += 3;
-        details.push(`+3 Sai DNF acertado`);
-      } else {
-        details.push(`+0 Sai (pusiste DNF pero acabó P${saiOfficialPos})`);
-      }
+    // DNF
+    if (dnfIds.has(bet.dnfDriver)) {
+      pts += 3;
+      details.push(`+3 DNF acertado (${bet.dnfName})`);
     } else {
-      const diffSai = Math.abs(bet.sainzPos - saiOfficialPos);
-      if (diffSai === 0) {
-        pts += 3;
-        details.push(`+3 Sai exacto (P${bet.sainzPos})`);
-      } else if (diffSai === 1) {
-        pts += 2;
-        details.push(`+2 Sai dif 1 (pusiste P${bet.sainzPos}, fue P${saiOfficialPos})`);
-      } else if (diffSai === 2) {
-        pts += 1;
-        details.push(`+1 Sai dif 2 (pusiste P${bet.sainzPos}, fue P${saiOfficialPos})`);
-      }
+      details.push(`+0 DNF (${bet.dnfName} terminó)`);
     }
 
     const breakdownText = details.length > 0 ? details.join(", ") : "Sin aciertos puntuables";
 
-    // Actualizar puntos en la BD
     await prisma.porraBet.update({
       where: { id: bet.id },
       data: {
@@ -718,23 +870,24 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
     });
   }
 
-  // Ordenar clasificación de la jornada: más puntos primero, en empate por fecha más temprana
+  // Ordenar clasificación: más puntos primero, desempate por fecha de registro
   evaluated.sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     return a.createdAt.getTime() - b.createdAt.getTime();
   });
 
-  const aloDisplay = aloDriver ? (isAloDnf ? `P${aloOfficialPos} (DNF)` : `P${aloOfficialPos}`) : "No participó";
-  const saiDisplay = saiDriver ? (isSaiDnf ? `P${saiOfficialPos} (DNF)` : `P${saiOfficialPos}`) : "No participó";
+  const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
+  const dnfsStr = officialDnfs.length > 0 ? officialDnfs.map((d) => d.name).join(", ") : "Ninguno";
 
-  let msg = `🏁 *RESULTADOS OFICIALES - ${raceName.toUpperCase()}* 🏁\n` +
+  let msg = `🏁 *RESULTADOS OFICIALES - ${raceName.toUpperCase()}* ${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `📊 *Llegada oficial real:*\n` +
-    `• P4: *${p4Official.name}*\n` +
-    `• P5: *${p5Official.name}*\n` +
-    `• P6: *${p6Official.name}*\n` +
-    `• 🇪🇸 Alonso: *${aloDisplay}*\n` +
-    `• 🇪🇸 Sainz: *${saiDisplay}*\n` +
+    `• 1º: *${top5Official[0].name}*\n` +
+    `• 2º: *${top5Official[1].name}*\n` +
+    `• 3º: *${top5Official[2].name}*\n` +
+    `• 4º: *${top5Official[3].name}*\n` +
+    `• 5º: *${top5Official[4].name}*\n` +
+    `• 💥 Abandonos (DNF): *${dnfsStr}*\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `🏆 *PODIO DE LA JORNADA:*\n\n`;
 
@@ -746,7 +899,7 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
       `   _${item.breakdown}_\n\n`;
   }
 
-  // INTERACCIÓN POSTERIOR: Mensajes de radio de equipo (Team Radio Banter) con Jarvis AI y Pitwall AI
+  // Team Radio Banter con IAs
   try {
     const winner = evaluated[0];
     const lastPlace = evaluated.length > 1 ? evaluated[evaluated.length - 1] : undefined;
@@ -755,26 +908,27 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
 
     const radioBanter = await generatePostRaceRadioBanter({
       raceName,
+      sport,
       winner: { userName: winner.userName, points: winner.points },
       lastPlace: lastPlace ? { userName: lastPlace.userName, points: lastPlace.points } : undefined,
       jarvisPoints: jarvisEvaluated?.points,
       pitwallPoints: pitwallEvaluated?.points,
-      officialP4: p4Official.name,
-      officialP5: p5Official.name,
-      officialP6: p6Official.name,
-      officialAlo: aloDisplay,
-      officialSai: saiDisplay,
+      officialP1: top5Official[0].name,
+      officialP2: top5Official[1].name,
+      officialP3: top5Official[2].name,
+      officialP4: top5Official[3].name,
+      officialP5: top5Official[4].name,
+      officialDnfs: dnfsStr,
     });
 
     msg += `${radioBanter}\n\n` +
-      `💡 _Consulta la clasificación general acumulada con *!porra tabla*._`;
+      `💡 _Consulta la clasificación general acumulada con *!porra${sport === "motogp" ? " moto" : ""} tabla*._`;
   } catch (err: any) {
     console.error("Error generando team radio banter:", err?.message);
     msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💡 _Consulta la clasificación general acumulada con *!porra tabla*._`;
+      `💡 _Consulta la clasificación general acumulada con *!porra${sport === "motogp" ? " moto" : ""} tabla*._`;
   }
 
-  // Generar imagen gráfica del podio
   const podiumData = evaluated.slice(0, 3).map((u) => ({
     name: u.userName,
     points: u.points,
@@ -784,6 +938,7 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
     raceName,
     season,
     podium: podiumData,
+    sport,
   });
 
   return {
@@ -792,12 +947,12 @@ export async function calculatePorraResults(groupJid: string): Promise<PorraResu
   };
 }
 
-export async function showSeasonRanking(groupJid: string): Promise<string> {
+export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp" = "f1"): Promise<string> {
   const currentYear = new Date().getFullYear();
 
-  // Obtener todas las apuestas puntuadas de este grupo para la temporada actual
   const bets = await prisma.porraBet.findMany({
     where: {
+      sport,
       groupJid,
       season: currentYear,
       points: { not: null },
@@ -805,14 +960,16 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     orderBy: { round: "asc" },
   });
 
+  const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
+
   if (bets.length === 0) {
-    return `🏆 *CLASIFICACIÓN GENERAL DE LA PORRA (${currentYear})* 🏁\n` +
+    return `🏆 *CLASIFICACIÓN GENERAL DE LA PORRA (${sport.toUpperCase()} ${currentYear})* 🏁${sportIcon}\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
       `_Aún no hay puntos acumulados en esta temporada._\n\n` +
-      `Los puntos se sumarán automáticamente al disputarse cada carrera con *!porra resultados*.`;
+      `Los puntos se sumarán automáticamente tras cada carrera con *!porra${sport === "motogp" ? " moto" : ""} resultados*.`;
   }
 
-  // 1. Calcular victorias de GP por cada ronda disputada
+  // Victorias de GP por ronda
   const roundMap = new Map<number, typeof bets>();
   for (const b of bets) {
     const list = roundMap.get(b.round) || [];
@@ -832,7 +989,6 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     }
   }
 
-  // 2. Agrupar estadísticas por usuario
   interface UserStat {
     userJid: string;
     userName: string;
@@ -840,7 +996,7 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     racesCount: number;
     gpWins: number;
     exactHits: number;
-    spanishPoints: number;
+    dnfHits: number;
   }
 
   const userMap = new Map<string, UserStat>();
@@ -854,22 +1010,21 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
       racesCount: 0,
       gpWins: gpWinnersCount.get(b.userJid) || 0,
       exactHits: 0,
-      spanishPoints: 0,
+      dnfHits: 0,
     };
 
     current.userName = b.userName;
     current.totalPoints += pts;
     current.racesCount += 1;
 
-    // Conteo de aciertos exactos (+3)
-    const exactMatches = (b.breakdown?.match(/\+3 /g) || []).length;
+    // Aciertos exactos en Top 5 (+3 P[1-5])
+    const exactMatches = (b.breakdown?.match(/\+3 P[1-5]/g) || []).length;
     current.exactHits += exactMatches;
 
-    // Conteo de puntos con Alonso y Sainz
-    const aloMatch = b.breakdown?.match(/\+([0-9]) Alo/);
-    const saiMatch = b.breakdown?.match(/\+([0-9]) Sai/);
-    if (aloMatch) current.spanishPoints += parseInt(aloMatch[1], 10);
-    if (saiMatch) current.spanishPoints += parseInt(saiMatch[1], 10);
+    // Aciertos de DNF (+3 DNF)
+    if (b.breakdown?.includes("+3 DNF")) {
+      current.dnfHits += 1;
+    }
 
     userMap.set(b.userJid, current);
   }
@@ -881,7 +1036,7 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     return b.exactHits - a.exactHits;
   });
 
-  let msg = `🏆 *CLASIFICACIÓN GENERAL DE LA PORRA (${currentYear})* 🏁\n` +
+  let msg = `🏆 *CLASIFICACIÓN GENERAL DE LA PORRA (${sport.toUpperCase()} ${currentYear})* 🏁${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   const medals = ["🥇", "🥈", "🥉"];
@@ -891,13 +1046,13 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     const leaderCrown = i === 0 ? " 👑" : "";
 
     msg += `${prefix} *${u.userName}* — *${u.totalPoints} pts* (${u.racesCount} GP)${leaderCrown}\n` +
-      `   ↳ 🏆 ${u.gpWins} vic | 🎯 ${u.exactHits} plenos | 🇪🇸 ${u.spanishPoints} pts ESP\n`;
+      `   ↳ 🏆 ${u.gpWins} vic | 🎯 ${u.exactHits} plenos Top 5 | 💥 ${u.dnfHits} DNF\n`;
   }
 
   // Cuadro de honor
   const topWinner = [...ranking].sort((a, b) => b.gpWins - a.gpWins)[0];
   const topNostradamus = [...ranking].sort((a, b) => b.exactHits - a.exactHits)[0];
-  const topSpanish = [...ranking].sort((a, b) => b.spanishPoints - a.spanishPoints)[0];
+  const topDnfHunter = [...ranking].sort((a, b) => b.dnfHits - a.dnfHits)[0];
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
     `🎖️ *CUADRO DE HONOR:*\n`;
@@ -906,14 +1061,144 @@ export async function showSeasonRanking(groupJid: string): Promise<string> {
     msg += `• 🏆 *Rey de Grandes Premios:* *${topWinner.userName}* (${topWinner.gpWins} victoria${topWinner.gpWins > 1 ? "s" : ""})\n`;
   }
   if (topNostradamus && topNostradamus.exactHits > 0) {
-    msg += `• 🎯 *El Nostradamus:* *${topNostradamus.userName}* (${topNostradamus.exactHits} acierto${topNostradamus.exactHits > 1 ? "s" : ""} exacto${topNostradamus.exactHits > 1 ? "s" : ""})\n`;
+    msg += `• 🎯 *El Nostradamus:* *${topNostradamus.userName}* (${topNostradamus.exactHits} posición${topNostradamus.exactHits > 1 ? "es exactas" : " exacta"})\n`;
   }
-  if (topSpanish && topSpanish.spanishPoints > 0) {
-    msg += `• 🇪🇸 *Especialista Español:* *${topSpanish.userName}* (${topSpanish.spanishPoints} pts en Alonso/Sainz)\n`;
+  if (topDnfHunter && topDnfHunter.dnfHits > 0) {
+    msg += `• 💥 *Cazador de Abandonos:* *${topDnfHunter.userName}* (${topDnfHunter.dnfHits} DNF acertado${topDnfHunter.dnfHits > 1 ? "s" : ""})\n`;
   }
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `💡 _Envía tu predicción para la próxima carrera con *!porra*._`;
+    `💡 _Envía tu predicción para la próxima carrera con *!porra${sport === "motogp" ? " moto" : ""}*._`;
+
+  return msg;
+}
+
+export async function showGPHistorial(groupJid: string, sport: "f1" | "motogp" = "f1"): Promise<string> {
+  const currentYear = new Date().getFullYear();
+
+  const bets = await prisma.porraBet.findMany({
+    where: {
+      sport,
+      groupJid,
+      season: currentYear,
+      points: { not: null },
+    },
+    orderBy: { round: "asc" },
+  });
+
+  const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
+
+  if (bets.length === 0) {
+    return `📅 *HISTORIAL DE LA TEMPORADA ${sport.toUpperCase()} ${currentYear}* 🏁${sportIcon}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `_Aún no se ha calculado ningún resultado en este grupo para ${sport.toUpperCase()}._\n\n` +
+      `💡 _Tras cada carrera usa *!porra${sport === "motogp" ? " moto" : ""} resultados* para registrar los puntos._`;
+  }
+
+  const rounds = new Map<number, typeof bets>();
+  for (const b of bets) {
+    if (!rounds.has(b.round)) rounds.set(b.round, []);
+    rounds.get(b.round)!.push(b);
+  }
+
+  function getFlagForRace(name: string): string {
+    const n = name.toLowerCase();
+    if (n.includes("qatar") || n.includes("lusail")) return "🇶🇦";
+    if (n.includes("portugal") || n.includes("portimao") || n.includes("algarve")) return "🇵🇹";
+    if (n.includes("argentina") || n.includes("termas")) return "🇦🇷";
+    if (n.includes("australia") || n.includes("melbourne") || n.includes("phillip island")) return "🇦🇺";
+    if (n.includes("china") || n.includes("shanghai")) return "🇨🇳";
+    if (n.includes("japan") || n.includes("japanese") || n.includes("motegi") || n.includes("suzuka")) return "🇯🇵";
+    if (n.includes("bahrain") || n.includes("bahréin")) return "🇧🇭";
+    if (n.includes("saudi") || n.includes("arabia") || n.includes("jeddah")) return "🇸🇦";
+    if (n.includes("monaco")) return "🇲🇨";
+    if (n.includes("jerez") || n.includes("catalunya") || n.includes("spain") || n.includes("spanish") || n.includes("españa") || n.includes("aragon") || n.includes("valencia")) return "🇪🇸";
+    if (n.includes("france") || n.includes("le mans")) return "🇫🇷";
+    if (n.includes("italy") || n.includes("italian") || n.includes("mugello") || n.includes("misano") || n.includes("monza") || n.includes("imola")) return "🇮🇹";
+    if (n.includes("germany") || n.includes("sachsenring")) return "🇩🇪";
+    if (n.includes("netherlands") || n.includes("assen") || n.includes("zandvoort")) return "🇳🇱";
+    if (n.includes("britain") || n.includes("british") || n.includes("silverstone")) return "🇬🇧";
+    if (n.includes("austria") || n.includes("spielberg") || n.includes("red bull ring")) return "🇦🇹";
+    if (n.includes("hungary") || n.includes("hungarian") || n.includes("hungaroring") || n.includes("balaton")) return "🇭🇺";
+    if (n.includes("belgium") || n.includes("spa")) return "🇧🇪";
+    if (n.includes("indonesia") || n.includes("mandalika")) return "🇮🇩";
+    if (n.includes("thailand") || n.includes("buriram")) return "🇹🇭";
+    if (n.includes("malaysia") || n.includes("sepang")) return "🇲🇾";
+    if (n.includes("cota") || n.includes("austin") || n.includes("americas") || n.includes("las vegas") || n.includes("miami") || n.includes("united states")) return "🇺🇸";
+    if (n.includes("mexico") || n.includes("méxico")) return "🇲🇽";
+    if (n.includes("brazil") || n.includes("brasil") || n.includes("interlagos")) return "🇧🇷";
+    if (n.includes("azerbaijan") || n.includes("baku")) return "🇦🇿";
+    if (n.includes("singapore") || n.includes("singapur")) return "🇸🇬";
+    if (n.includes("abu dhabi") || n.includes("abu dabi")) return "🇦🇪";
+    return "🏁";
+  }
+
+  const sortedRounds = Array.from(rounds.entries()).sort((a, b) => a[0] - b[0]);
+  const aiJids = new Set([AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id]);
+
+  const totalPts = new Map<string, { name: string; pts: number }>();
+  for (const b of bets) {
+    if (!totalPts.has(b.userJid)) totalPts.set(b.userJid, { name: b.userName, pts: 0 });
+    totalPts.get(b.userJid)!.pts += b.points || 0;
+  }
+
+  let msg = `📅 *HISTORIAL DE LA TEMPORADA ${sport.toUpperCase()} ${currentYear}* 🏁${sportIcon}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  for (const [round, roundBets] of sortedRounds) {
+    const raceName = roundBets[0].raceName || `GP Ronda ${round}`;
+    const flag = getFlagForRace(raceName);
+
+    const sorted = [...roundBets].sort((a, b) => {
+      if ((b.points || 0) !== (a.points || 0)) return (b.points || 0) - (a.points || 0);
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+
+    const humansSorted = sorted.filter((b) => !aiJids.has(b.userJid));
+    const aisSorted = sorted.filter((b) => aiJids.has(b.userJid));
+
+    const roundMedals = ["🥇", "🥈", "🥉"];
+    msg += `${flag} *Ronda ${round}: ${raceName}*\n`;
+
+    for (let i = 0; i < humansSorted.length; i++) {
+      const b = humansSorted[i];
+      const prefix = i < 3 ? roundMedals[i] : `  ${i + 1}.`;
+      msg += `${prefix} ${b.userName} — *${b.points} pts*`;
+
+      const exactCount = (b.breakdown?.match(/\+3 P[1-5]/g) || []).length;
+      if (exactCount > 0) msg += ` 🎯×${exactCount}`;
+      if (b.breakdown?.includes("+3 DNF")) msg += ` 💥`;
+      msg += `\n`;
+    }
+
+    if (aisSorted.length > 0) {
+      const aiLine = aisSorted.map((b) => {
+        const shortName = b.userName.includes("Jarvis") ? "Jarvis" : "Pitwall";
+        return `🤖 ${shortName} ${b.points}pts`;
+      }).join(" · ");
+      msg += `  _(${aiLine})_\n`;
+    }
+
+    msg += `\n`;
+  }
+
+  const topHumans = Array.from(totalPts.entries())
+    .filter(([jid]) => !aiJids.has(jid))
+    .sort((a, b) => b[1].pts - a[1].pts)
+    .slice(0, 3);
+
+  const totalGPs = sortedRounds.length;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📊 *${totalGPs} GP${totalGPs !== 1 ? "s" : ""} disputado${totalGPs !== 1 ? "s" : ""}* en esta temporada\n`;
+
+  if (topHumans.length > 0) {
+    const podiumMedals = ["🥇", "🥈", "🥉"];
+    msg += `🏆 *Líderes:* ` +
+      topHumans.map(([_, v], i) => `${podiumMedals[i]} ${v.name} ${v.pts}pts`).join(" · ") + `\n`;
+  }
+
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💡 _Consulta la clasificación completa con *!porra${sport === "motogp" ? " moto" : ""} tabla*._`;
 
   return msg;
 }

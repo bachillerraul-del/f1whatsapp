@@ -30,26 +30,38 @@ model SessionFile {
   updatedAt DateTime @updatedAt
 }
 
+model ChatSettings {
+  id        String   @id @default(cuid())
+  jid       String   @unique // WhatsApp ID del chat (grupo o privado)
+  botActive Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
 model PorraBet {
   id        String   @id @default(cuid())
+  sport     String   @default("f1") // "f1" | "motogp"
   groupJid  String
   userJid   String
   userName  String
   season    Int
   round     Int
   raceName  String?
-  p4Driver  String   // driverId (e.g. "norris")
-  p4Name    String   // display name (e.g. "Lando Norris")
-  p5Driver  String   // driverId (e.g. "leclerc")
-  p5Name    String   // display name (e.g. "Charles Leclerc")
-  p6Driver  String   // driverId (e.g. "piastri")
-  p6Name    String   // display name (e.g. "Oscar Piastri")
-  alonsoPos Int      // predicted finish position (1-22)
-  sainzPos  Int      // predicted finish position (1-22)
+  p1Driver  String   // driverId
+  p1Name    String   // display name
+  p2Driver  String
+  p2Name    String
+  p3Driver  String
+  p3Name    String
+  p4Driver  String
+  p4Name    String
+  p5Driver  String
+  p5Name    String
+  dnfDriver String   // driverId for DNF
+  dnfName   String   // display name for DNF
   points    Int?     // total points won in this GP (null if pending)
   breakdown String?  // points explanation
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([groupJid, season, round, userJid])
+  @@unique([sport, groupJid, season, round, userJid])
 }

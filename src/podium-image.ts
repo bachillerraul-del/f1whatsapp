@@ -9,6 +9,7 @@ export interface PodiumImageData {
   raceName: string;
   season: number;
   podium: PodiumParticipant[];
+  sport?: "f1" | "motogp";
 }
 
 function escapeXml(unsafe: string): string {
@@ -47,6 +48,9 @@ export function generatePodiumImage(data: PodiumImageData): Buffer | null {
     const p3Name = p3 ? escapeXml(truncate(p3.name)) : "—";
     const p3Pts = p3 ? `${p3.points} PTS` : "0 PTS";
 
+    const sportLabel = data.sport === "motogp" ? "LA PORRA DE MOTOGP" : "LA PORRA DE F1";
+    const accentColor = data.sport === "motogp" ? "#0284c7" : "#e10600";
+
     const svg = `
 <svg width="1000" height="650" viewBox="0 0 1000 650" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -79,16 +83,16 @@ export function generatePodiumImage(data: PodiumImageData): Buffer | null {
   <!-- Background -->
   <rect width="1000" height="650" fill="url(#bg)"/>
 
-  <!-- Top Accent Bar (Official F1 Red) -->
-  <rect x="0" y="0" width="1000" height="8" fill="#e10600"/>
+  <!-- Top Accent Bar -->
+  <rect x="0" y="0" width="1000" height="8" fill="${accentColor}"/>
 
   <!-- Category Badge -->
-  <rect x="390" y="30" width="220" height="32" rx="16" fill="#e10600"/>
+  <rect x="390" y="30" width="220" height="32" rx="16" fill="${accentColor}"/>
   <text x="500" y="52" fill="#ffffff" font-size="14" font-family="Arial, Helvetica, sans-serif" font-weight="900" text-anchor="middle" letter-spacing="3">PODIO OFICIAL</text>
 
   <!-- Title & Subtitle -->
   <text x="500" y="105" fill="#ffffff" font-size="30" font-family="Arial, Helvetica, sans-serif" font-weight="bold" text-anchor="middle">${title}</text>
-  <text x="500" y="135" fill="#94a3b8" font-size="16" font-family="Arial, Helvetica, sans-serif" text-anchor="middle" letter-spacing="1">LA PORRA DE F1 • ${seasonText}</text>
+  <text x="500" y="135" fill="#94a3b8" font-size="16" font-family="Arial, Helvetica, sans-serif" text-anchor="middle" letter-spacing="1">${sportLabel} • ${seasonText}</text>
 
   <!-- ================= 2ND PLACE (SILVER) ================= -->
   <g opacity="${p2 ? '1' : '0.4'}">

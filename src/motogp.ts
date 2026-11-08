@@ -1,4 +1,5 @@
 import axios from "axios";
+import { findRider } from "./motogp-riders.js";
 
 const BASE_URL = "https://api.motogp.pulselive.com/motogp/v1";
 
@@ -269,5 +270,135 @@ export async function getLastMotoGPResults(): Promise<string> {
   } catch (err: any) {
     console.error("Error fetching last MotoGP results:", err?.message);
     return "⚠️ Error al obtener los resultados del último GP de MotoGP.";
+  }
+}
+
+export interface NextMotoGPInfo {
+  season: number;
+  round: number;
+  raceName: string;
+  qualyDate?: Date;
+  raceDate?: Date;
+}
+
+export async function getNextMotoGPEventInfo(): Promise<NextMotoGPInfo | null> {
+  try {
+    const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
+    const eventsRes = await axios.get(`${BASE_URL}/results/events?seasonUuid=${seasonUuid}`, {
+      timeout: 10000,
+    });
+    const events: any[] = eventsRes.data.filter((e: any) => !e.test);
+    const now = new Date();
+
+    let targetIndex = events.findIndex((e: any) => {
+      const end = new Date(`${e.date_end}T23:59:59Z`);
+      return end >= now;
+    });
+
+    if (targetIndex === -1 && events.length > 0) {
+      targetIndex = events.length - 1;
+    }
+
+    if (targetIndex === -1) return null;
+
+    const targetEvent = events[targetIndex];
+    const season = new Date(targetEvent.date_start).getFullYear() || new Date().getFullYear();
+    const round = targetIndex + 1;
+    const raceName = targetEvent.name || targetEvent.sponsored_name || `GP Ronda ${round}`;
+
+    const sessionsRes = await axios.get(
+      `${BASE_URL}/results/sessions?eventUuid=${targetEvent.id}&categoryUuid=${categoryUuid}`,
+      { timeout: 10000 }
+    );
+    const sessions: any[] = sessionsRes.data || [];
+
+    const qualySession = sessions.find((s: any) => s.type === "Q1") || sessions.find((s: any) => s.type === "Q2");
+    const raceSession = sessions.find((s: any) => s.type === "RAC");
+
+    return {
+      season,
+      round,
+      raceName,
+      qualyDate: qualySession ? new Date(qualySession.date) : undefined,
+      raceDate: raceSession ? new Date(raceSession.date) : undefined,
+    };
+  } catch (err: any) {
+    console.error("Error getting next MotoGP event info:", err?.message);
+    return null;
+  }
+}
+
+export interface MotoGPResultData {
+  season: number;
+  round: number;
+  raceName: string;
+  top5: Array<{ id: string; name: string }>;
+  dnfs: Array<{ id: string; name: string }>;
+}
+
+export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | null> {
+  try {
+    const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
+    const eventsRes = await axios.get(`${BASE_URL}/results/events?seasonUuid=${seasonUuid}`, {
+      timeout: 10000,
+    });
+    const finishedEvents: any[] = (eventsRes.data || []).filter(
+      (e: any) => !e.test && e.status === "FINISHED"
+    );
+
+    if (finishedEvents.length === 0) return null;
+
+    const lastEvent = finishedEvents[finishedEvents.length - 1];
+    const allEvents = eventsRes.data.filter((e: any) => !e.test);
+    const round = allEvents.indexOf(lastEvent) + 1;
+    const season = new Date(lastEvent.date_start).getFullYear() || new Date().getFullYear();
+    const raceName = lastEvent.name || lastEvent.sponsored_name || `GP Ronda ${round}`;
+
+    const sessionsRes = await axios.get(
+      `${BASE_URL}/results/sessions?eventUuid=${lastEvent.id}&categoryUuid=${categoryUuid}`,
+      { timeout: 10000 }
+    );
+    const sessions = sessionsRes.data || [];
+    const raceSession = sessions.find((s: any) => s.type === "RAC");
+    if (!raceSession) return null;
+
+    const classRes = await axios.get(
+      `${BASE_URL}/results/session/${raceSession.id}/classification?test=false`,
+      { timeout: 10000 }
+    );
+    const results: any[] = classRes.data?.classification || [];
+    if (results.length < 5) return null;
+
+    const top5: Array<{ id: string; name: string }> = [];
+    for (const item of results.slice(0, 5)) {
+      const parsed = findRider(item.rider?.full_name);
+      top5.push({
+        id: parsed?.id || item.rider?.id || "unknown",
+        name: parsed?.name || item.rider?.full_name || "Piloto",
+      });
+    }
+
+    const dnfs: Array<{ id: string; name: string }> = [];
+    for (const item of results) {
+      const isDnf = !item.position || item.status === "OUTSTND" || item.status === "DNF" || item.status === "RET" || item.status === "NC";
+      if (isDnf) {
+        const parsed = findRider(item.rider?.full_name);
+        dnfs.push({
+          id: parsed?.id || item.rider?.id || "unknown",
+          name: parsed?.name || item.rider?.full_name || "Piloto",
+        });
+      }
+    }
+
+    return {
+      season,
+      round,
+      raceName,
+      top5,
+      dnfs,
+    };
+  } catch (err: any) {
+    console.error("Error getting last MotoGP results data:", err?.message);
+    return null;
   }
 }
