@@ -48,16 +48,84 @@ export function normalizeWord(str: string): string {
     .replace(/[^a-z0-9]/g, "");
 }
 
+const STOPWORDS = new Set([
+  "y", "e", "o", "u", "de", "del", "la", "el", "los", "las", "con", "sin",
+  "por", "para", "en", "a", "al", "mi", "tu", "su", "es", "son", "un", "una",
+  "dnf", "abandono", "ret", "out", "caida", "porra", "f1", "moto", "motogp",
+]);
+
+/**
+ * Convierte nombres compuestos ("alex marquez", "raul fernandez", "di giannantonio", etc.)
+ * en su identificador único antes de separar los tokens por espacios.
+ */
+export function collapseCompoundRiderNames(text: string): string {
+  let result = text;
+  const allPhrases: Array<{ phrase: string; id: string }> = [];
+
+  for (const r of KNOWN_RIDERS) {
+    allPhrases.push({ phrase: r.name, id: r.id });
+    for (const alias of r.aliases) {
+      if (alias.includes(" ")) {
+        allPhrases.push({ phrase: alias, id: r.id });
+      }
+    }
+  }
+
+  allPhrases.push(
+    { phrase: "pecco bagnaia", id: "bagnaia" },
+    { phrase: "marc marquez", id: "marquez" },
+    { phrase: "alex marquez", id: "alex_marquez" },
+    { phrase: "raul fernandez", id: "raul_fernandez" },
+    { phrase: "augusto fernandez", id: "augusto_fernandez" },
+    { phrase: "pol espargaro", id: "pol_espargaro" },
+    { phrase: "aleix espargaro", id: "aleix_espargaro" },
+    { phrase: "di giannantonio", id: "diggia" },
+    { phrase: "fabio di giannantonio", id: "diggia" }
+  );
+
+  allPhrases.sort((a, b) => b.phrase.length - a.phrase.length);
+
+  for (const { phrase, id } of allPhrases) {
+    const pattern = phrase
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split(/\s+/)
+      .map((w) =>
+        w
+          .replace(/a/gi, "[aáàäâ]")
+          .replace(/e/gi, "[eéèëê]")
+          .replace(/i/gi, "[iíìïî]")
+          .replace(/o/gi, "[oóòöô]")
+          .replace(/u/gi, "[uúùüû]")
+          .replace(/n/gi, "[nñ]")
+          .replace(/g/gi, "[gğ]")
+      )
+      .join("\\s+");
+    const regex = new RegExp(`\\b${pattern}\\b`, "gi");
+    result = result.replace(regex, id);
+  }
+
+  return result;
+}
+
 export function findRider(word: string): MotoGPRiderDef | null {
   const clean = normalizeWord(word);
-  if (!clean) return null;
+  if (!clean || STOPWORDS.has(clean)) return null;
 
+  // 1. Coincidencia exacta por ID, dorsal o alias
   for (const rider of KNOWN_RIDERS) {
-    if (rider.id === clean) return rider;
+    if (normalizeWord(rider.id) === clean) return rider;
     if (String(rider.number) === clean) return rider;
     if (rider.aliases.some((a) => normalizeWord(a) === clean)) return rider;
+  }
+
+  // 2. Coincidencia parcial solo para tokens de al menos 3 caracteres
+  if (clean.length < 3) return null;
+
+  for (const rider of KNOWN_RIDERS) {
     const normName = normalizeWord(rider.name);
     if (normName.includes(clean) || clean.includes(normName)) return rider;
   }
   return null;
 }
+

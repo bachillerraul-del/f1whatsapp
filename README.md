@@ -27,23 +27,24 @@ Juego interactivo para grupos de WhatsApp donde cada participante pronostica el 
   2. **1 DNF (Abandono / Caída):** 1 piloto que no finalizará la carrera (no puede estar en tu Top 5).
   - _Ejemplo F1:_ `!porra ver nor lec pia rus dnf: ham` o `!porra verstappen norris leclerc piastri russell hamilton`
   - _Ejemplo MotoGP:_ `!porra moto marquez martin bagnaia acosta bastianini dnf: binder` (o `!porramoto ...`)
-- 🏆 **Sistema de Puntuación (Hasta 18 pts por GP):**
+- 🏆 **Sistema de Puntuación Escalonado (Hasta 18 pts por GP):**
   - **+3 puntos:** Por cada posición exacta acertada en el Top 5 (1º, 2º, 3º, 4º o 5º).
-  - **+1 punto:** Si el piloto finaliza en el Top 5, pero en una posición distinta a la que predijiste.
+  - **+2 puntos:** Si el piloto finaliza en el Top 5 a **solo 1 puesto de distancia** de tu predicción (casi exacto).
+  - **+1 punto:** Si el piloto finaliza en el Top 5 a **2 o más puestos de distancia** de tu predicción.
   - **+3 puntos:** Si aciertas el piloto que sufre DNF (abandono / retirada / caída).
   - _Máximo posible por fin de semana: 18 puntos._
+- 📈 **Clasificación General:** Se determina por la **suma total de todos los puntos conseguidos en cada GP** de la temporada (en caso de empate en un GP, desempata la fecha de última modificación `updatedAt` de la apuesta).
 - ⏳ **Límite de apuestas:** Se cierran automáticamente al comenzar la **Clasificación (Q1)** del sábado.
-- ⏰ **Aviso automático de cierre:** El bot avisa 2 horas antes de la Qualy para que nadie se quede sin enviar su porra.
+- ⏰ **Aviso automático de cierre:** El bot avisa 2 horas antes de la Qualy (tanto en F1 como en MotoGP) para que nadie se quede sin enviar su porra.
 - 🤖 **Competidores IA (Jarvis AI & Pitwall AI):** Dos inteligencias artificiales que juegan en la porra del grupo formulando estrategias con **Google Gemini AI**:
   - **🤖 Jarvis AI:** Estratega analítico de telemetría (probabilidades y ritmo de tandas).
   - **🤖 Pitwall AI:** Jefe de muro audaz (apuestas arriesgadas, sorpresas en el Top 5 y DNF).
 - 🖼️ **Tarjeta gráfica del Podio:** Al publicarse los resultados de la carrera, el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones (distinguiendo F1 y MotoGP con estilos propios).
 - 📢 **Publicación automática de resultados:** Nada más finalizar la carrera el domingo, el bot calcula los puntos y publica automáticamente el podio y desglose en cada grupo.
 - 🏎️ / 🏍️ **Feedback visual:** El bot reacciona con el emoji 🏎️ (F1) o 🏍️ (MotoGP) al mensaje de WhatsApp cuando registras un pronóstico válido.
-- 🚫 **Reglas anti-copia:**
-  - Máximo 4 coincidencias exactas de las 6 predicciones con otro jugador del grupo. Si coincide en 5 o 6, la apuesta es rechazada automáticamente indicando los aciertos coincidentes.
-  - No se permite seleccionar exactamente los mismos 5 pilotos del Top 5 y el mismo DNF que otro jugador, incluso si cambias el orden de los puestos.
-- 🎖️ **Palmarés y Cuadro de Honor (`!porra tabla` / `!porra moto tabla`):** La clasificación general incluye estadísticas avanzadas:
+- 🚫 **Regla anti-copia:**
+  - Máximo 4 coincidencias exactas de las 6 predicciones con otro jugador humano del grupo. Si coincide en 5 o 6 posiciones exactas, la apuesta es rechazada indicando las coincidencias (se permite usar los mismos pilotos en distinto orden, y las IAs nunca bloquean apuestas humanas).
+- 🎖️ **Palmarés y Cuadro de Honor (`!porra tabla` / `!porra moto tabla`):** La clasificación general por puntos totales incluye estadísticas avanzadas:
   - 🏆 **Victorias de GP:** Carreras ganadas por cada participante.
   - 🎯 **El Nostradamus:** Total de posiciones exactas acertadas (+3).
   - 💥 **Cazador de Abandonos:** Total de aciertos de DNF (+3).

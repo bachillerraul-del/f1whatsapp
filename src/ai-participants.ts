@@ -4,9 +4,9 @@ import { findDriver, KNOWN_DRIVERS, type F1DriverDef } from "./f1-drivers.js";
 import { findRider, KNOWN_RIDERS, type MotoGPRiderDef } from "./motogp-riders.js";
 
 const GEMINI_MODELS = [
-  "gemini-3.1-flash-lite",
-  "gemini-3.8-flash",
   "gemini-flash-latest",
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
 ];
 
 export interface AIPersonality {

@@ -10,6 +10,9 @@ import type { WASocket } from "@whiskeysockets/baileys";
 const JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1";
 const MOTOGP_BASE = "https://api.motogp.pulselive.com/motogp/v1";
 
+let activeSock: WASocket | null = null;
+let alertsCronTask: cron.ScheduledTask | null = null;
+
 async function broadcastAlert(sock: WASocket, message: string) {
   const subscribers = await getActiveSubscribers();
   for (const sub of subscribers) {
@@ -25,8 +28,17 @@ async function broadcastAlert(sock: WASocket, message: string) {
 }
 
 export function setupAlerts(sock: WASocket) {
+  activeSock = sock;
+
+  if (alertsCronTask) {
+    console.log("🔄 Socket de alertas actualizado (tarea cron ya activa).");
+    return;
+  }
+
   // Check every 15 minutes to accurately catch the 24h and 2h windows
-  cron.schedule("*/15 * * * *", async () => {
+  alertsCronTask = cron.schedule("*/15 * * * *", async () => {
+    const currentSock = activeSock;
+    if (!currentSock) return;
     const now = new Date();
 
     // =========================================================
@@ -50,7 +62,7 @@ export function setupAlerts(sock: WASocket) {
               console.log(`🚀 [Alerta 1 F1] 24h antes de FP1 para ${race.raceName}`);
               const schedulePreview = await getNextRace();
               const message = `🚨 *¡ATENCIÓN: EL GRAN PREMIO DE F1 COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
-              await broadcastAlert(sock, message);
+              await broadcastAlert(currentSock, message);
               await markAlertSent(alertKey);
             }
           }
@@ -73,7 +85,7 @@ export function setupAlerts(sock: WASocket) {
                 `⏱️ Sesión: *Carrera Sprint*\n` +
                 `📍 Circuito: ${race.Circuit?.circuitName || ""}\n\n` +
                 `¡Prepárate, los semáforos se apagan en 2 horas! 🏁⚡`;
-              await broadcastAlert(sock, message);
+              await broadcastAlert(currentSock, message);
               await markAlertSent(alertKey);
             }
           }
@@ -122,7 +134,7 @@ export function setupAlerts(sock: WASocket) {
                 `Usa: *!porra [1º] [2º] [3º] [4º] [5º] [DNF]*\n` +
                 `_Ejemplo: !porra ver nor lec pia rus dnf: ham_\n\n` +
                 `📊 Consulta todas las apuestas (incluyendo a las IAs) con *!porra ver*. ¡Que no se te pase! 🏁`;
-              await broadcastAlert(sock, message);
+              await broadcastAlert(currentSock, message);
               await markAlertSent(alertKey);
             }
           }
@@ -145,7 +157,7 @@ export function setupAlerts(sock: WASocket) {
                 `⏱️ Sesión: *CARRERA PRINCIPAL*\n` +
                 `📍 Circuito: ${race.Circuit?.circuitName || ""}\n\n` +
                 `¡Los semáforos se apagan en 2 horas! ¡Que empiece el espectáculo! 🏆🏁`;
-              await broadcastAlert(sock, message);
+              await broadcastAlert(currentSock, message);
               await markAlertSent(alertKey);
             }
           }
@@ -171,10 +183,11 @@ export function setupAlerts(sock: WASocket) {
         });
         const events: any[] = (eventsRes.data || []).filter((e: any) => !e.test);
 
-        const nextEvent = events.find((e: any) => {
+        const nextEventIndex = events.findIndex((e: any) => {
           const end = new Date(`${e.date_end}T23:59:59Z`);
           return end >= now;
         });
+        const nextEvent = nextEventIndex !== -1 ? events[nextEventIndex] : undefined;
 
         if (nextEvent) {
           const catRes = await axios.get(`${MOTOGP_BASE}/results/categories?seasonUuid=${currentSeason.id}`, {
@@ -190,8 +203,12 @@ export function setupAlerts(sock: WASocket) {
             );
             const sessions: any[] = sessionsRes.data || [];
 
-            // Identificar FP1, Sprint (SPR) y Carrera (RAC)
+            // Identificar FP1, Qualy (Q1/Q2), Sprint (SPR) y Carrera (RAC)
             const fp1Session = sessions.find((s: any) => s.type === "FP" && s.number === 1) || sessions.find((s: any) => s.type === "FP1");
+            const qualySession =
+              sessions.find((s: any) => s.type === "Q1") ||
+              sessions.find((s: any) => s.type === "Q" && s.number === 1) ||
+              sessions.find((s: any) => s.type === "Q2");
             const sprintSession = sessions.find((s: any) => s.type === "SPR");
             const raceSession = sessions.find((s: any) => s.type === "RAC");
 
@@ -206,7 +223,54 @@ export function setupAlerts(sock: WASocket) {
                   console.log(`🚀 [Alerta 1 MotoGP] 24h antes de FP1 para ${nextEvent.name}`);
                   const schedulePreview = await getNextMotoGP();
                   const message = `🚨 *¡ATENCIÓN: EL GRAN PREMIO DE MOTOGP COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
-                  await broadcastAlert(sock, message);
+                  await broadcastAlert(currentSock, message);
+                  await markAlertSent(alertKey);
+                }
+              }
+            }
+
+            // --- RECORDATORIO PORRA (MotoGP): 2 horas antes de la Clasificación (Q1) ---
+            if (qualySession?.date) {
+              const qualyDate = new Date(qualySession.date);
+              const diffMinutes = Math.round((qualyDate.getTime() - now.getTime()) / (1000 * 60));
+
+              if (diffMinutes >= 105 && diffMinutes <= 135) {
+                const alertKey = `motogp-${nextEvent.id}-2h-qualy-porra`;
+                if (!(await wasAlertSent(alertKey))) {
+                  const eventName = nextEvent.sponsored_name || nextEvent.name || `GP Ronda ${nextEventIndex + 1}`;
+                  const seasonYear = new Date(nextEvent.date_start).getFullYear() || now.getFullYear();
+                  const roundNum = nextEventIndex + 1;
+                  const raceDateStr = raceSession?.date ? new Date(raceSession.date).toISOString() : undefined;
+
+                  console.log(`🚀 [Alerta Porra MotoGP] 2h antes de la Qualy para ${eventName}`);
+
+                  const subscribers = await getActiveSubscribers();
+                  let aiSummary = "";
+
+                  for (const sub of subscribers) {
+                    try {
+                      const aiRes = await ensureAIParticipants("motogp", sub.jid, seasonYear, roundNum, eventName, {
+                        force: true,
+                        raceDateStr,
+                      });
+                      if (!aiSummary && aiRes.text) {
+                        aiSummary = aiRes.text;
+                      }
+                    } catch {
+                      // omit
+                    }
+                  }
+
+                  const message = `⏰ *¡ALERTA PORRA MOTOGP: QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS!* 🚨\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `🏍️ *${eventName}*\n` +
+                    `⏱️ La Clasificación (Q1) comienza en 2 horas.\n\n` +
+                    (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus estrategias tras analizar los entrenamientos.\n\n`) +
+                    `👉 ¡Última oportunidad para enviar o modificar tu pronóstico de MotoGP!\n` +
+                    `Usa: *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF]*\n` +
+                    `_Ejemplo: !porra moto marquez martin bagnaia acosta bastianini dnf: binder_\n\n` +
+                    `📊 Consulta todas las apuestas (incluyendo a las IAs) con *!porra moto ver*. ¡Que no se te pase! 🏁`;
+                  await broadcastAlert(currentSock, message);
                   await markAlertSent(alertKey);
                 }
               }
@@ -227,7 +291,7 @@ export function setupAlerts(sock: WASocket) {
                     `⏱️ Sesión: *Carrera Sprint*\n` +
                     `📍 Circuito: ${nextEvent.circuit?.name || ""}\n\n` +
                     `¡Gas a fondo en 2 horas! 🏁⚡`;
-                  await broadcastAlert(sock, message);
+                  await broadcastAlert(currentSock, message);
                   await markAlertSent(alertKey);
                 }
               }
@@ -248,7 +312,7 @@ export function setupAlerts(sock: WASocket) {
                     `⏱️ Sesión: *CARRERA PRINCIPAL*\n` +
                     `📍 Circuito: ${nextEvent.circuit?.name || ""}\n\n` +
                     `¡Se apaga el semáforo en 2 horas! ¡A disfrutar de las motos! 🏆🏁`;
-                  await broadcastAlert(sock, message);
+                  await broadcastAlert(currentSock, message);
                   await markAlertSent(alertKey);
                 }
               }
@@ -316,7 +380,7 @@ export function setupAlerts(sock: WASocket) {
 
                   // 1. Enviar primero los resultados oficiales de la carrera
                   if (raceResultsText) {
-                    await sock.sendMessage(jid, {
+                    await currentSock.sendMessage(jid, {
                       text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏎️\n\n${raceResultsText}`,
                     });
                   }
@@ -326,12 +390,12 @@ export function setupAlerts(sock: WASocket) {
                     const res = await calculatePorraResults(jid, "f1");
                     const captionText = `📢 *¡RESULTADOS DE LA PORRA DE F1!* 🏆🏎️\n\n` + res.text;
                     if (res.imageBuffer) {
-                      await sock.sendMessage(jid, {
+                      await currentSock.sendMessage(jid, {
                         image: res.imageBuffer,
                         caption: captionText,
                       });
                     } else {
-                      await sock.sendMessage(jid, {
+                      await currentSock.sendMessage(jid, {
                         text: captionText,
                       });
                     }
@@ -397,7 +461,7 @@ export function setupAlerts(sock: WASocket) {
 
                 // 1. Enviar primero los resultados oficiales de la carrera
                 if (motoRaceResultsText) {
-                  await sock.sendMessage(jid, {
+                  await currentSock.sendMessage(jid, {
                     text: `🚨 *¡CARRERA FINALIZADA!* 🏁🏍️\n\n${motoRaceResultsText}`,
                   });
                 }
@@ -407,12 +471,12 @@ export function setupAlerts(sock: WASocket) {
                   const res = await calculatePorraResults(jid, "motogp");
                   const captionText = `📢 *¡RESULTADOS DE LA PORRA DE MOTOGP!* 🏆🏍️\n\n` + res.text;
                   if (res.imageBuffer) {
-                    await sock.sendMessage(jid, {
+                    await currentSock.sendMessage(jid, {
                       image: res.imageBuffer,
                       caption: captionText,
                     });
                   } else {
-                    await sock.sendMessage(jid, {
+                    await currentSock.sendMessage(jid, {
                       text: captionText,
                     });
                   }

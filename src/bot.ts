@@ -33,7 +33,7 @@ import {
   prisma,
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
-import { pushSessionToDb, schedulePushSessionToDb } from "./session-sync.js";
+import { pushSessionToDb, schedulePushSessionToDb, clearSessionCache } from "./session-sync.js";
 import { handlePorraCommand } from "./porra.js";
 
 export let currentQr: string | null = null;
@@ -41,6 +41,19 @@ export let isBotConnected: boolean = false;
 export let currentSock: WASocket | null = null;
 export let messagesCount: number = 0;
 export let lastMessageLog: string | null = null;
+
+let reconnectAttempts = 0;
+let reconnectTimer: NodeJS.Timeout | null = null;
+
+function scheduleReconnect(delayMs: number) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startBot().catch((err) => {
+      console.error("Error al reconectar el bot:", err?.message);
+    });
+  }, delayMs);
+}
 
 class SimpleCacheStore implements CacheStore {
   private cache = new Map<string, any>();
@@ -221,6 +234,7 @@ export async function startBot() {
       if (isLoggedOut) {
         console.log("❌ Sesión cerrada por WhatsApp. Limpiando credenciales antiguas para generar nuevo QR...");
         try {
+          clearSessionCache();
           await prisma.sessionFile.deleteMany();
           if (fs.existsSync("auth_info_baileys")) {
             fs.rmSync("auth_info_baileys", { recursive: true, force: true });
@@ -228,21 +242,20 @@ export async function startBot() {
         } catch (e: any) {
           console.error("Error al limpiar sesión antigua:", e.message);
         }
-        startBot();
+        scheduleReconnect(2000);
       } else {
-        startBot();
+        reconnectAttempts++;
+        const delayMs = Math.min(3000 * Math.pow(1.5, reconnectAttempts - 1), 30000);
+        console.log(`⏳ Reconectando WhatsApp en ${(delayMs / 1000).toFixed(1)}s (intento #${reconnectAttempts})...`);
+        scheduleReconnect(delayMs);
       }
     } else if (connection === "open") {
+      reconnectAttempts = 0;
       currentQr = null;
       isBotConnected = true;
       console.log("\n🟢 ¡BOT DE F1 & MOTOGP CONECTADO EXITOSAMENTE A WHATSAPP! 🏁🏎️🏍️\n");
       await pushSessionToDb();
       setupAlerts(sock);
-
-      // Sincronizar periódicamente las claves cada 10 minutos
-      setInterval(async () => {
-        await pushSessionToDb();
-      }, 10 * 60 * 1000);
     }
   });
 

@@ -34,19 +34,31 @@ function startHealthServer() {
       return;
     }
 
-    // Debug endpoint to diagnose WhatsApp status
-    if (req.url === "/debug") {
+    // Debug endpoint to diagnose WhatsApp status (sanitized by default)
+    if (req.url?.startsWith("/debug")) {
+      const reqUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const token = reqUrl.searchParams.get("token");
+      const isAuthorized = Boolean(process.env.DEBUG_TOKEN && token === process.env.DEBUG_TOKEN);
+
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
-        JSON.stringify({
-          connected: isBotConnected,
-          user: currentSock?.user,
-          registered: (currentSock?.authState as any)?.creds?.registered,
-          messagesCount,
-          lastMessageLog,
-          uptime: process.uptime(),
-          timestamp: new Date().toISOString(),
-        }, null, 2)
+        JSON.stringify(
+          {
+            connected: isBotConnected,
+            registered: Boolean((currentSock?.authState as any)?.creds?.registered),
+            messagesCount,
+            uptime: Math.round(process.uptime()),
+            timestamp: new Date().toISOString(),
+            ...(isAuthorized
+              ? {
+                  user: currentSock?.user,
+                  lastMessageLog,
+                }
+              : {}),
+          },
+          null,
+          2
+        )
       );
       return;
     }

@@ -281,8 +281,17 @@ export interface NextMotoGPInfo {
   raceDate?: Date;
 }
 
+const MOTOGP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+let nextMotoGPInfoCache: { data: NextMotoGPInfo; expiresAt: number } | null = null;
+let lastMotoGPResultsCache: { data: MotoGPResultData; expiresAt: number } | null = null;
+
 export async function getNextMotoGPEventInfo(): Promise<NextMotoGPInfo | null> {
   try {
+    const nowMs = Date.now();
+    if (nextMotoGPInfoCache && nextMotoGPInfoCache.expiresAt > nowMs) {
+      return nextMotoGPInfoCache.data;
+    }
+
     const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
     const eventsRes = await axios.get(`${BASE_URL}/results/events?seasonUuid=${seasonUuid}`, {
       timeout: 10000,
@@ -312,16 +321,22 @@ export async function getNextMotoGPEventInfo(): Promise<NextMotoGPInfo | null> {
     );
     const sessions: any[] = sessionsRes.data || [];
 
-    const qualySession = sessions.find((s: any) => s.type === "Q1") || sessions.find((s: any) => s.type === "Q2");
+    const qualySession =
+      sessions.find((s: any) => s.type === "Q1") ||
+      sessions.find((s: any) => s.type === "Q" && s.number === 1) ||
+      sessions.find((s: any) => s.type === "Q2");
     const raceSession = sessions.find((s: any) => s.type === "RAC");
 
-    return {
+    const info: NextMotoGPInfo = {
       season,
       round,
       raceName,
       qualyDate: qualySession ? new Date(qualySession.date) : undefined,
       raceDate: raceSession ? new Date(raceSession.date) : undefined,
     };
+
+    nextMotoGPInfoCache = { data: info, expiresAt: nowMs + MOTOGP_CACHE_TTL_MS };
+    return info;
   } catch (err: any) {
     console.error("Error getting next MotoGP event info:", err?.message);
     return null;
@@ -338,6 +353,11 @@ export interface MotoGPResultData {
 
 export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | null> {
   try {
+    const nowMs = Date.now();
+    if (lastMotoGPResultsCache && lastMotoGPResultsCache.expiresAt > nowMs) {
+      return lastMotoGPResultsCache.data;
+    }
+
     const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
     const eventsRes = await axios.get(`${BASE_URL}/results/events?seasonUuid=${seasonUuid}`, {
       timeout: 10000,
@@ -380,7 +400,10 @@ export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | nul
 
     const dnfs: Array<{ id: string; name: string }> = [];
     for (const item of results) {
-      const isDnf = !item.position || item.status === "OUTSTND" || item.status === "DNF" || item.status === "RET" || item.status === "NC";
+      const statusUpper = String(item.status || "").toUpperCase();
+      const isDnf =
+        !item.position ||
+        ["OUTSTND", "DNF", "RET", "NC", "DSQ", "DNS", "EX"].includes(statusUpper);
       if (isDnf) {
         const parsed = findRider(item.rider?.full_name);
         dnfs.push({
@@ -390,15 +413,19 @@ export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | nul
       }
     }
 
-    return {
+    const resultData: MotoGPResultData = {
       season,
       round,
       raceName,
       top5,
       dnfs,
     };
+
+    lastMotoGPResultsCache = { data: resultData, expiresAt: nowMs + MOTOGP_CACHE_TTL_MS };
+    return resultData;
   } catch (err: any) {
     console.error("Error getting last MotoGP results data:", err?.message);
     return null;
   }
 }
+

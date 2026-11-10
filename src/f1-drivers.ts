@@ -43,13 +43,75 @@ export function normalizeWord(str: string): string {
     .replace(/[^a-z0-9]/g, "");
 }
 
+const STOPWORDS = new Set([
+  "y", "e", "o", "u", "de", "del", "la", "el", "los", "las", "con", "sin",
+  "por", "para", "en", "a", "al", "mi", "tu", "su", "es", "son", "un", "una",
+  "dnf", "abandono", "ret", "out", "caida", "porra", "f1", "moto", "motogp",
+]);
+
+/**
+ * Convierte nombres compuestos ("max verstappen", "carlos sainz", "kimi antonelli", etc.)
+ * en su identificador único con guion bajo antes de separar por espacios.
+ */
+export function collapseCompoundDriverNames(text: string): string {
+  let result = text;
+  const allPhrases: Array<{ phrase: string; id: string }> = [];
+
+  for (const d of KNOWN_DRIVERS) {
+    allPhrases.push({ phrase: d.name, id: d.id });
+    for (const alias of d.aliases) {
+      if (alias.includes(" ")) {
+        allPhrases.push({ phrase: alias, id: d.id });
+      }
+    }
+  }
+
+  // Añadir variantes compuestas habituales
+  allPhrases.push(
+    { phrase: "kimi antonelli", id: "antonelli" },
+    { phrase: "alex albon", id: "albon" },
+    { phrase: "ollie bearman", id: "bearman" },
+    { phrase: "checo perez", id: "perez" }
+  );
+
+  // Ordenar por longitud descendente para reemplazar primero los nombres más largos
+  allPhrases.sort((a, b) => b.phrase.length - a.phrase.length);
+
+  for (const { phrase, id } of allPhrases) {
+    const pattern = phrase
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split(/\s+/)
+      .map((w) =>
+        w
+          .replace(/a/gi, "[aáàäâ]")
+          .replace(/e/gi, "[eéèëê]")
+          .replace(/i/gi, "[iíìïî]")
+          .replace(/o/gi, "[oóòöô]")
+          .replace(/u/gi, "[uúùüû]")
+      )
+      .join("\\s+");
+    const regex = new RegExp(`\\b${pattern}\\b`, "gi");
+    result = result.replace(regex, id);
+  }
+
+  return result;
+}
+
 export function findDriver(word: string): F1DriverDef | null {
   const clean = normalizeWord(word);
-  if (!clean) return null;
+  if (!clean || STOPWORDS.has(clean)) return null;
+
+  // 1. Coincidencia exacta por ID o alias
+  for (const driver of KNOWN_DRIVERS) {
+    if (normalizeWord(driver.id) === clean) return driver;
+    if (driver.aliases.some((a) => normalizeWord(a) === clean)) return driver;
+  }
+
+  // 2. Coincidencia parcial solo para tokens de al menos 3 caracteres
+  if (clean.length < 3) return null;
 
   for (const driver of KNOWN_DRIVERS) {
-    if (driver.id === clean) return driver;
-    if (driver.aliases.some((a) => normalizeWord(a) === clean)) return driver;
     const normName = normalizeWord(driver.name);
     if (normName.includes(clean) || clean.includes(normName)) return driver;
   }
@@ -70,3 +132,4 @@ export function parsePosOrDNF(w: string): number | null {
 export function formatPos(pos: number): string {
   return pos === 0 ? "DNF (Abandono)" : `P${pos}`;
 }
+

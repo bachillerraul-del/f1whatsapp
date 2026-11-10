@@ -5,12 +5,18 @@ import {
   type F1DriverDef,
   KNOWN_DRIVERS,
   findDriver,
+  collapseCompoundDriverNames,
 } from "./f1-drivers.js";
 import {
   type MotoGPRiderDef,
   KNOWN_RIDERS,
   findRider,
+  collapseCompoundRiderNames,
 } from "./motogp-riders.js";
+import {
+  fetchNextF1RaceData,
+  fetchLastF1RaceData,
+} from "./f1.js";
 import {
   getNextMotoGPEventInfo,
   getLastMotoGPResultsData,
@@ -57,12 +63,14 @@ export function getPorraRulesMessage(sport: "f1" | "motogp" = "f1"): string {
       `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando el rendimiento real de los pilotos.\n\n` +
       `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
       `• *+3 pts* : Por cada piloto acertado en su *posición exacta* del Top 5 (1º, 2º, 3º, 4º o 5º).\n` +
-      `• *+1 pt*  : Si el piloto termina en el *Top 5*, pero en una posición distinta a la que predijiste.\n` +
-      `• *+3 pts* : Si aciertas el piloto que sufre *DNF (abandono / caída)*.\n\n` +
+      `• *+2 pts* : Si el piloto termina en el *Top 5 a solo 1 puesto* de distancia de tu predicción.\n` +
+      `• *+1 pt*  : Si el piloto termina en el *Top 5 a 2 o más puestos* de distancia.\n` +
+      `• *+3 pts* : Si aciertas el piloto que sufre *DNF (abandono / caída)*.\n` +
+      `• 📈 *Clasificación General:* Se ordena por la *suma total de todos los puntos* conseguidos en cada GP.\n` +
+      `• ⏱️ *Desempates:* En caso de empate a puntos, gana quien haya sellado antes su pronóstico definitivo.\n\n` +
       `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
-      `🚫 *Reglas anti-copia:*\n` +
-      `• Máximo 4 aciertos exactos de coincidencia con otro participante (máx 4 de 6).\n` +
-      `• No se permite elegir los mismos 5 pilotos del Top 5 y el mismo DNF que otro jugador.\n\n` +
+      `🚫 *Regla anti-copia:*\n` +
+      `• Máximo 4 predicciones exactas de coincidencia con otro jugador humano del grupo (máx 4 de 6). Puedes usar los mismos pilotos si cambias el orden.\n\n` +
       `📊 *COMANDOS DISPONIBLES:*\n` +
       `🔹 *!porra moto [apuesta]* : Enviar o modificar tu apuesta\n` +
       `🔹 *!porra moto analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
@@ -87,12 +95,14 @@ export function getPorraRulesMessage(sport: "f1" | "motogp" = "f1"): string {
     `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando la telemetría de libres.\n\n` +
     `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
     `• *+3 pts* : Por cada posición exacta acertada en el Top 5 (P1, P2, P3, P4 o P5).\n` +
-    `• *+1 pt*  : Si el piloto termina en el Top 5, pero en posición incorrecta.\n` +
-    `• *+3 pts* : Si aciertas el piloto que abandona la carrera (DNF).\n\n` +
+    `• *+2 pts* : Si el piloto termina en el Top 5 a *solo 1 puesto* de distancia de tu predicción.\n` +
+    `• *+1 pt*  : Si el piloto termina en el Top 5 a *2 o más puestos* de distancia.\n` +
+    `• *+3 pts* : Si aciertas el piloto que abandona la carrera (DNF).\n` +
+    `• 📈 *Clasificación General:* Se ordena por la *suma total de todos los puntos* conseguidos en cada GP.\n` +
+    `• ⏱️ *Desempates:* En caso de empate a puntos, gana quien haya sellado antes su pronóstico definitivo.\n\n` +
     `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
-    `🚫 *Reglas anti-copia:*\n` +
-    `• Máximo 4 posiciones exactas de coincidencia con otro participante (máx 4 de 6).\n` +
-    `• No se permite elegir los mismos 5 pilotos del Top 5 y el mismo DNF que otro jugador.\n\n` +
+    `🚫 *Regla anti-copia:*\n` +
+    `• Máximo 4 posiciones exactas de coincidencia con otro jugador humano del grupo (máx 4 de 6). Puedes usar los mismos pilotos si cambias el orden.\n\n` +
     `📊 *COMANDOS DISPONIBLES:*\n` +
     `🔹 *!porra [apuesta]* : Enviar o modificar tu apuesta\n` +
     `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
@@ -148,7 +158,10 @@ export function parsePorraArgs(
   };
 
   let dnfDriver: DriverEntry | null = null;
-  let textWithoutDnf = fullText;
+  let textWithoutDnf =
+    sport === "motogp"
+      ? collapseCompoundRiderNames(fullText)
+      : collapseCompoundDriverNames(fullText);
 
   // 1. Detectar etiqueta explícita de DNF (ej: "dnf: ham", "dnf hamilton", "abandono: stroll", "caida binder")
   const dnfRegex = /(?:dnf|abandono|ret|out|caida|caída)[:\s]+([a-zA-Z0-9_\-]+)/i;
@@ -325,8 +338,7 @@ export async function handlePorraCommand(
         qualyDate = info.qualyDate;
         raceDateStr = info.raceDate?.toISOString();
       } else {
-        const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-        const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+        const race = await fetchNextF1RaceData();
         if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
         season = parseInt(race.season, 10);
         round = parseInt(race.round, 10);
@@ -382,8 +394,7 @@ export async function handlePorraCommand(
         raceName = info.raceName;
         raceDateStr = info.raceDate?.toISOString();
       } else {
-        const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-        const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+        const race = await fetchNextF1RaceData();
         if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
         season = parseInt(race.season, 10);
         round = parseInt(race.round, 10);
@@ -478,8 +489,7 @@ async function registerPorraBet(
     qualyDate = info.qualyDate;
   } else {
     try {
-      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+      const race = await fetchNextF1RaceData();
       if (!race) {
         return "⚠️ No hay información de la próxima carrera de F1 disponible.";
       }
@@ -502,18 +512,18 @@ async function registerPorraBet(
     return `🔒 *¡APUESTAS CERRADAS!* La Clasificación del *${raceName}* ya ha comenzado. Ya no se pueden enviar ni modificar pronósticos para este Gran Premio.`;
   }
 
-  // REGLAS ANTI-COPIA
+  // REGLA ANTI-COPIA (solo compara contra otros participantes humanos, nunca contra las IAs)
   const otherBets = await prisma.porraBet.findMany({
     where: {
       sport,
       groupJid,
       season,
       round,
-      userJid: { not: userJid },
+      userJid: {
+        notIn: [userJid, AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id],
+      },
     },
   });
-
-  const currentTop5Set = new Set([parsed.p1.id, parsed.p2.id, parsed.p3.id, parsed.p4.id, parsed.p5.id]);
 
   for (const other of otherBets) {
     let exactMatches = 0;
@@ -544,25 +554,14 @@ async function registerPorraBet(
       matchDetails.push(`DNF: ${parsed.dnf.name}`);
     }
 
-    // Regla 1: Máximo 4 aciertos exactos de 6 (si tiene 5 o 6 coincidencias exactas, se rechaza)
+    // Regla única: Máximo 4 aciertos exactos de 6 (si coincide en 5 o 6 puestos exactos, se rechaza)
     if (exactMatches > 4) {
       return `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIA!* 🚫\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
         `Por reglamento anti-copia, *no puedes coincidir en más de 4 pronósticos exactos* con otro participante del grupo (máximo 4 de 6).\n\n` +
-        `Coincides en *${exactMatches} de 6* predicciones con *${other.userName}*:\n` +
+        `Coincides en *${exactMatches} de 6* predicciones exactas con *${other.userName}*:\n` +
         `• ${matchDetails.join("\n• ")}\n\n` +
-        `👉 Modifica al menos ${exactMatches - 4} predicción(es) para diferenciar tu apuesta.`;
-    }
-
-    // Regla 2: Mismo Top 5 en cualquier orden + mismo DNF
-    const otherTop5Set = new Set([other.p1Driver, other.p2Driver, other.p3Driver, other.p4Driver, other.p5Driver]);
-    const sameTop5Members = [...currentTop5Set].every((id) => otherTop5Set.has(id));
-
-    if (sameTop5Members && other.dnfDriver === parsed.dnf.id) {
-      return `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIA!* 🚫\n` +
-        `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `No puedes seleccionar exactamente los *mismos 5 pilotos del Top 5* y el *mismo DNF* que *${other.userName}*, incluso si alteras su orden.\n\n` +
-        `👉 Cambia al menos un piloto de tu Top 5 o tu piloto de DNF para crear un pronóstico diferenciado.`;
+        `👉 Modifica al menos ${exactMatches - 4} posición(es) o el DNF para diferenciar tu apuesta.`;
     }
   }
 
@@ -651,8 +650,7 @@ export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "
     raceDateStr = info.raceDate?.toISOString();
   } else {
     try {
-      const nextRes = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 8000 });
-      const race = nextRes.data.MRData?.RaceTable?.Races?.[0];
+      const race = await fetchNextF1RaceData();
       if (!race) return "⚠️ No hay información de la próxima carrera de F1 disponible.";
       season = parseInt(race.season, 10);
       round = parseInt(race.round, 10);
@@ -737,6 +735,48 @@ export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "
   return msg;
 }
 
+export interface BetHitStats {
+  exactHits: number;
+  closeHits: number;
+  top5PartialHits: number;
+  dnfHit: boolean;
+}
+
+export function formatBetBreakdown(
+  exactItems: Array<{ pos: number; driverName: string }>,
+  closeItems: Array<{ predPos: number; realPos: number; driverName: string }>,
+  partialItems: Array<{ driverName: string }>,
+  dnfItem: { hit: boolean; driverName: string }
+): string {
+  const details: string[] = [];
+  for (const item of exactItems) {
+    details.push(`+3 P${item.pos} exacto (${item.driverName})`);
+  }
+  for (const item of closeItems) {
+    details.push(`+2 Casi exacto P${item.predPos}→P${item.realPos} (${item.driverName})`);
+  }
+  for (const item of partialItems) {
+    details.push(`+1 Top5 (${item.driverName})`);
+  }
+  if (dnfItem.hit) {
+    details.push(`+3 DNF acertado (${dnfItem.driverName})`);
+  } else {
+    details.push(`+0 DNF (${dnfItem.driverName} terminó)`);
+  }
+  return details.length > 0 ? details.join(", ") : "Sin aciertos puntuables";
+}
+
+export function extractBetStats(breakdown: string | null | undefined): BetHitStats {
+  if (!breakdown) {
+    return { exactHits: 0, closeHits: 0, top5PartialHits: 0, dnfHit: false };
+  }
+  const exactHits = (breakdown.match(/\+3 P[1-5]/g) || []).length;
+  const closeHits = (breakdown.match(/\+2 Casi exacto/g) || []).length;
+  const top5PartialHits = (breakdown.match(/\+1 Top5/g) || []).length;
+  const dnfHit = breakdown.includes("+3 DNF");
+  return { exactHits, closeHits, top5PartialHits, dnfHit };
+}
+
 export async function calculatePorraResults(
   groupJid: string,
   sport: "f1" | "motogp" = "f1"
@@ -759,8 +799,7 @@ export async function calculatePorraResults(
     officialDnfs = motoData.dnfs;
   } else {
     try {
-      const lastRes = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 8000 });
-      const race = lastRes.data.MRData?.RaceTable?.Races?.[0];
+      const race = await fetchLastF1RaceData();
       if (!race || !race.Results || race.Results.length < 5) {
         return { text: "⚠️ No se encontraron resultados oficiales completos para la última carrera de F1." };
       }
@@ -775,9 +814,11 @@ export async function calculatePorraResults(
       }));
 
       officialDnfs = results.filter((r: any) => {
-        const posText = r.positionText;
-        const status = (r.status || "").toLowerCase();
-        return posText === "R" || (!status.includes("lap") && status !== "finished");
+        const posText = String(r.positionText || "").toUpperCase();
+        const status = String(r.status || "").toLowerCase();
+        const nonFinishPos = ["R", "D", "W", "F", "N", "E"].includes(posText);
+        const finishedNormally = status === "finished" || status.includes("lap");
+        return nonFinishPos || !finishedNormally;
       }).map((r: any) => ({
         id: r.Driver.driverId,
         name: `${r.Driver.givenName} ${r.Driver.familyName}`,
@@ -816,48 +857,61 @@ export async function calculatePorraResults(
     userName: string;
     points: number;
     breakdown: string;
-    createdAt: Date;
+    updatedAt: Date;
   }
 
   const evaluated: EvaluatedUser[] = [];
 
   for (const bet of bets) {
     let pts = 0;
-    const details: string[] = [];
+    const exactItems: Array<{ pos: number; driverName: string }> = [];
+    const closeItems: Array<{ predPos: number; realPos: number; driverName: string }> = [];
+    const partialItems: Array<{ driverName: string }> = [];
 
     const positions = [
-      { pos: 1, driverId: bet.p1Driver, driverName: bet.p1Name, official: top5Official[0] },
-      { pos: 2, driverId: bet.p2Driver, driverName: bet.p2Name, official: top5Official[1] },
-      { pos: 3, driverId: bet.p3Driver, driverName: bet.p3Name, official: top5Official[2] },
-      { pos: 4, driverId: bet.p4Driver, driverName: bet.p4Name, official: top5Official[3] },
-      { pos: 5, driverId: bet.p5Driver, driverName: bet.p5Name, official: top5Official[4] },
+      { pos: 1, driverId: bet.p1Driver, driverName: bet.p1Name },
+      { pos: 2, driverId: bet.p2Driver, driverName: bet.p2Name },
+      { pos: 3, driverId: bet.p3Driver, driverName: bet.p3Name },
+      { pos: 4, driverId: bet.p4Driver, driverName: bet.p4Name },
+      { pos: 5, driverId: bet.p5Driver, driverName: bet.p5Name },
     ];
 
     for (const item of positions) {
-      if (item.driverId === item.official.id) {
-        pts += 3;
-        details.push(`+3 P${item.pos} exacto (${item.driverName})`);
-      } else if (top5Ids.includes(item.driverId)) {
-        pts += 1;
-        details.push(`+1 Top5 (${item.driverName})`);
+      const realIndex = top5Ids.indexOf(item.driverId);
+      if (realIndex !== -1) {
+        const realPos = realIndex + 1;
+        const diff = Math.abs(item.pos - realPos);
+        if (diff === 0) {
+          pts += 3;
+          exactItems.push({ pos: item.pos, driverName: item.driverName });
+        } else if (diff === 1) {
+          pts += 2;
+          closeItems.push({ predPos: item.pos, realPos, driverName: item.driverName });
+        } else {
+          pts += 1;
+          partialItems.push({ driverName: item.driverName });
+        }
       }
     }
 
     // DNF
-    if (dnfIds.has(bet.dnfDriver)) {
+    const dnfHit = dnfIds.has(bet.dnfDriver);
+    if (dnfHit) {
       pts += 3;
-      details.push(`+3 DNF acertado (${bet.dnfName})`);
-    } else {
-      details.push(`+0 DNF (${bet.dnfName} terminó)`);
     }
 
-    const breakdownText = details.length > 0 ? details.join(", ") : "Sin aciertos puntuables";
+    const breakdownText = formatBetBreakdown(exactItems, closeItems, partialItems, {
+      hit: dnfHit,
+      driverName: bet.dnfName,
+    });
 
+    // Preservar updatedAt original del pronóstico para no alterar los desempates al recalcular
     await prisma.porraBet.update({
       where: { id: bet.id },
       data: {
         points: pts,
         breakdown: breakdownText,
+        updatedAt: bet.updatedAt,
       },
     });
 
@@ -866,14 +920,14 @@ export async function calculatePorraResults(
       userName: bet.userName,
       points: pts,
       breakdown: breakdownText,
-      createdAt: bet.createdAt,
+      updatedAt: bet.updatedAt,
     });
   }
 
-  // Ordenar clasificación: más puntos primero, desempate por fecha de registro
+  // Ordenar clasificación del GP: más puntos primero, desempate por fecha de última modificación (updatedAt)
   evaluated.sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
-    return a.createdAt.getTime() - b.createdAt.getTime();
+    return a.updatedAt.getTime() - b.updatedAt.getTime();
   });
 
   const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
@@ -969,7 +1023,9 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
       `Los puntos se sumarán automáticamente tras cada carrera con *!porra${sport === "motogp" ? " moto" : ""} resultados*.`;
   }
 
-  // Victorias de GP por ronda
+  const aiJids = new Set([AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id]);
+
+  // Victorias de GP por ronda (un ganador por GP desempatado por puntos y luego updatedAt; humanos e IAs evaluados sin que la IA deje desierto el trofeo humano)
   const roundMap = new Map<number, typeof bets>();
   for (const b of bets) {
     const list = roundMap.get(b.round) || [];
@@ -979,13 +1035,15 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
 
   const gpWinnersCount = new Map<string, number>();
   for (const [, roundBets] of roundMap.entries()) {
-    const maxPts = Math.max(...roundBets.map((b) => b.points || 0));
-    if (maxPts > 0) {
-      for (const b of roundBets) {
-        if (b.points === maxPts) {
-          gpWinnersCount.set(b.userJid, (gpWinnersCount.get(b.userJid) || 0) + 1);
-        }
-      }
+    const humanRoundBets = roundBets.filter((b) => !aiJids.has(b.userJid) && (b.points || 0) > 0);
+    const pool = humanRoundBets.length > 0 ? humanRoundBets : roundBets.filter((b) => (b.points || 0) > 0);
+    if (pool.length > 0) {
+      const sortedPool = [...pool].sort((a, b) => {
+        if ((b.points || 0) !== (a.points || 0)) return (b.points || 0) - (a.points || 0);
+        return a.updatedAt.getTime() - b.updatedAt.getTime();
+      });
+      const winnerJid = sortedPool[0].userJid;
+      gpWinnersCount.set(winnerJid, (gpWinnersCount.get(winnerJid) || 0) + 1);
     }
   }
 
@@ -1017,26 +1075,25 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
     current.totalPoints += pts;
     current.racesCount += 1;
 
-    // Aciertos exactos en Top 5 (+3 P[1-5])
-    const exactMatches = (b.breakdown?.match(/\+3 P[1-5]/g) || []).length;
-    current.exactHits += exactMatches;
-
-    // Aciertos de DNF (+3 DNF)
-    if (b.breakdown?.includes("+3 DNF")) {
+    const stats = extractBetStats(b.breakdown);
+    current.exactHits += stats.exactHits;
+    if (stats.dnfHit) {
       current.dnfHits += 1;
     }
 
     userMap.set(b.userJid, current);
   }
 
+  // La Clasificación General se ordena por la suma total de puntos acumulados en todos los GPs
   const ranking = Array.from(userMap.values());
   ranking.sort((a, b) => {
     if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-    if (b.gpWins !== a.gpWins) return b.gpWins - a.gpWins;
-    return b.exactHits - a.exactHits;
+    if (b.exactHits !== a.exactHits) return b.exactHits - a.exactHits;
+    return b.gpWins - a.gpWins;
   });
 
   let msg = `🏆 *CLASIFICACIÓN GENERAL DE LA PORRA (${sport.toUpperCase()} ${currentYear})* 🏁${sportIcon}\n` +
+    `📌 _Suma total de puntos acumulados en cada GP_\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   const medals = ["🥇", "🥈", "🥉"];
@@ -1151,7 +1208,7 @@ export async function showGPHistorial(groupJid: string, sport: "f1" | "motogp" =
 
     const sorted = [...roundBets].sort((a, b) => {
       if ((b.points || 0) !== (a.points || 0)) return (b.points || 0) - (a.points || 0);
-      return a.createdAt.getTime() - b.createdAt.getTime();
+      return a.updatedAt.getTime() - b.updatedAt.getTime();
     });
 
     const humansSorted = sorted.filter((b) => !aiJids.has(b.userJid));
@@ -1165,9 +1222,9 @@ export async function showGPHistorial(groupJid: string, sport: "f1" | "motogp" =
       const prefix = i < 3 ? roundMedals[i] : `  ${i + 1}.`;
       msg += `${prefix} ${b.userName} — *${b.points} pts*`;
 
-      const exactCount = (b.breakdown?.match(/\+3 P[1-5]/g) || []).length;
-      if (exactCount > 0) msg += ` 🎯×${exactCount}`;
-      if (b.breakdown?.includes("+3 DNF")) msg += ` 💥`;
+      const stats = extractBetStats(b.breakdown);
+      if (stats.exactHits > 0) msg += ` 🎯×${stats.exactHits}`;
+      if (stats.dnfHit) msg += ` 💥`;
       msg += `\n`;
     }
 

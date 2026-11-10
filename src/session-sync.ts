@@ -44,17 +44,25 @@ export function schedulePushSessionToDb(delayMs = 2500) {
   }, delayMs);
 }
 
+export function clearSessionCache() {
+  contentCache.clear();
+}
+
 export async function pushSessionToDb() {
   try {
     if (!fs.existsSync(AUTH_DIR)) return;
 
-    const fileNames = fs.readdirSync(AUTH_DIR);
+    const fileNames = fs.readdirSync(AUTH_DIR).filter((fileName) => {
+      const filePath = path.join(AUTH_DIR, fileName);
+      return fs.statSync(filePath).isFile();
+    });
+
     if (fileNames.length === 0) return;
+
+    const currentFilesSet = new Set(fileNames);
 
     for (const fileName of fileNames) {
       const filePath = path.join(AUTH_DIR, fileName);
-      if (!fs.statSync(filePath).isFile()) continue;
-
       const content = fs.readFileSync(filePath, "utf8");
       // Evitar consultas innecesarias si el archivo no ha cambiado
       if (contentCache.get(fileName) === content) {
@@ -69,7 +77,21 @@ export async function pushSessionToDb() {
 
       contentCache.set(fileName, content);
     }
+
+    // Limpiar de la caché y de la base de datos los archivos obsoletos que Baileys ya eliminó en disco
+    for (const cachedKey of contentCache.keys()) {
+      if (!currentFilesSet.has(cachedKey)) {
+        contentCache.delete(cachedKey);
+      }
+    }
+
+    await prisma.sessionFile.deleteMany({
+      where: {
+        id: { notIn: fileNames },
+      },
+    });
   } catch (err: any) {
     console.error("⚠️ Error sincronizando sesión a Supabase:", err?.message);
   }
 }
+

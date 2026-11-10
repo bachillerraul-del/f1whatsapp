@@ -1,6 +1,41 @@
 import axios from "axios";
 
 const JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1";
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+let nextRaceCache: CacheEntry<any> | null = null;
+let lastRaceCache: CacheEntry<any> | null = null;
+
+export async function fetchNextF1RaceData(): Promise<any | null> {
+  const now = Date.now();
+  if (nextRaceCache && nextRaceCache.expiresAt > now) {
+    return nextRaceCache.data;
+  }
+  const res = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 10000 });
+  const race = res.data.MRData?.RaceTable?.Races?.[0] || null;
+  if (race) {
+    nextRaceCache = { data: race, expiresAt: now + CACHE_TTL_MS };
+  }
+  return race;
+}
+
+export async function fetchLastF1RaceData(): Promise<any | null> {
+  const now = Date.now();
+  if (lastRaceCache && lastRaceCache.expiresAt > now) {
+    return lastRaceCache.data;
+  }
+  const res = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 10000 });
+  const race = res.data.MRData?.RaceTable?.Races?.[0] || null;
+  if (race) {
+    lastRaceCache = { data: race, expiresAt: now + CACHE_TTL_MS };
+  }
+  return race;
+}
 
 // Helper to format dates explicitly to Spanish mainland time (Europe/Madrid)
 function formatDate(dateStr?: string, timeStr?: string): string {
@@ -24,8 +59,7 @@ function formatDate(dateStr?: string, timeStr?: string): string {
 
 export async function getNextRace(): Promise<string> {
   try {
-    const res = await axios.get(`${JOLPICA_BASE}/current/next.json`, { timeout: 10000 });
-    const race = res.data.MRData?.RaceTable?.Races?.[0];
+    const race = await fetchNextF1RaceData();
 
     if (!race) {
       return "🏁 No hay información disponible para la próxima carrera en este momento.";
@@ -134,8 +168,7 @@ export async function getConstructorStandings(): Promise<string> {
 
 export async function getLastRaceResults(): Promise<string> {
   try {
-    const res = await axios.get(`${JOLPICA_BASE}/current/last/results.json`, { timeout: 10000 });
-    const race = res.data.MRData?.RaceTable?.Races?.[0];
+    const race = await fetchLastF1RaceData();
 
     if (!race || !race.Results?.length) {
       return "🏁 No hay resultados recientes de carreras disponibles.";
@@ -165,3 +198,4 @@ export async function getLastRaceResults(): Promise<string> {
     return "⚠️ Error al obtener los resultados de la última carrera.";
   }
 }
+
