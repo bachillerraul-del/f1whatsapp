@@ -16,6 +16,7 @@ import {
 import {
   fetchNextF1RaceData,
   fetchLastF1RaceData,
+  fetchLastF1QualifyingData,
 } from "./f1.js";
 import {
   getNextMotoGPEventInfo,
@@ -50,68 +51,80 @@ export function getPorraRulesMessage(sport: "f1" | "motogp" = "f1"): string {
   if (sport === "motogp") {
     return `🏍️ *LA PORRA DE MOTOGP* 🏁\n` +
       `━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (1º al 5º)* y *1 piloto que sufrirá DNF (abandono / caída)*.\n\n` +
+      `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (1º al 5º)*, *1 piloto que sufrirá DNF (abandono / caída)* y el *3º de la Clasificación (QP3)*.\n\n` +
       `📋 *CÓMO JUGAR (Antes de la Qualy):*\n` +
-      `Envía tu pronóstico con:\n` +
-      `👉 *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF]*\n` +
+      `Envía tu pronóstico de 7 selecciones con:\n` +
+      `👉 *!porra moto [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
       `_(o también con !porramoto ...)_\n\n` +
       `*Ejemplos válidos:*\n` +
-      `🔹 *!porra moto marquez martin bagnaia acosta bastianini dnf: binder*\n` +
-      `🔹 *!porramoto marquez martin bagnaia acosta bastianini binder*\n` +
-      `🔹 *!porra moto 1º marquez 2º martin 3º bagnaia 4º acosta 5º bastianini dnf mir*\n\n` +
+      `🔹 *!porra moto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales*\n` +
+      `🔹 *!porramoto marquez martin bagnaia acosta bastianini binder vinales*\n` +
+      `🔹 *!porra moto 1º marquez 2º martin 3º bagnaia 4º acosta 5º bastianini dnf mir qp3 aldeguer*\n\n` +
       `🤖 *COMPETIDORES IA (Gemini):*\n` +
       `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando el rendimiento real de los pilotos.\n\n` +
-      `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
-      `• *+3 pts* : Por cada piloto acertado en su *posición exacta* del Top 5 (1º, 2º, 3º, 4º o 5º).\n` +
+      `🏆 *SISTEMA DE PUNTUACIÓN (Mismo sistema para Carrera y QP3, máx 21 pts):*\n` +
+      `• *+3 pts* : Por cada piloto acertado en su *posición exacta* del Top 5 de la carrera (1º al 5º).\n` +
       `• *+2 pts* : Si el piloto termina en el *Top 5 a solo 1 puesto* de distancia de tu predicción.\n` +
       `• *+1 pt*  : Si el piloto termina en el *Top 5 a 2 o más puestos* de distancia.\n` +
-      `• *+3 pts* : Si aciertas el piloto que sufre *DNF (abandono / caída)*.\n` +
+      `• *+3 pts* : Si aciertas el piloto que sufre *DNF (abandono / caída)* en carrera.\n` +
+      `• ⏱️ *P3 Clasificación (mismo sistema):*\n` +
+      `  - *+3 pts* : Si el piloto clasifica exactamente en *3ª posición (P3)*.\n` +
+      `  - *+2 pts* : Si clasifica a *solo 1 puesto de distancia* (2º o 4º en Qualy).\n` +
+      `  - *+1 pt*  : Si clasifica dentro del *Top 5 de Qualy* a ±2 puestos (1º o 5º en Qualy).\n` +
       `• 📈 *Clasificación General:* Se ordena por la *suma total de todos los puntos* conseguidos en cada GP.\n` +
       `• ⏱️ *Desempates:* En caso de empate a puntos, gana quien haya sellado antes su pronóstico definitivo.\n\n` +
       `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
-      `🚫 *Regla anti-copia:*\n` +
-      `• Máximo 4 predicciones exactas de coincidencia con otro jugador humano del grupo (máx 4 de 6). Puedes usar los mismos pilotos si cambias el orden.\n\n` +
-      `📊 *COMANDOS DISPONIBLES:*\n` +
-      `🔹 *!porra moto [apuesta]* : Enviar o modificar tu apuesta\n` +
-      `🔹 *!porra moto analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
-      `🔹 *!porra moto ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
-      `🔹 *!porra moto ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
-      `🔹 *!porra moto resultados* : Calcular puntos, podio gráfico y radio tras la carrera\n` +
-      `🔹 *!porra moto historial* : Resumen de todos los GPs jugados en la temporada\n` +
-      `🔹 *!porra moto tabla* : Clasificación general de MotoGP`;
+      `🚫 *Reglas anti-copia (solo aplican a Carrera: Top 5 + DNF):*\n` +
+      `• 🚫 *Máximo 3 posiciones exactas en el Top 5* de coincidencia con otro participante (máx 3 de 5).\n` +
+      `• 🚫 *Prohibido coincidir en la predicción DNF* (no puedes elegir el mismo piloto DNF que otro jugador).\n` +
+      `• ℹ️ _En la predicción de P3 de Clasificación (QP3) no se aplica regla anti-copia._\n\n` +
+      `📊 *COMANDOS DE LA PORRA (MOTOGP):*\n` +
+      `🔹 *!porramoto [1º..5º] [DNF] [QP3]* : Enviar o editar apuesta\n` +
+      `🔹 *!porramoto ver* : Ver apuestas del grupo\n` +
+      `🔹 *!porramoto puntos* : Calcular resultados y podio del GP\n` +
+      `🔹 *!porramoto tabla* : Clasificación general (suma de puntos)\n` +
+      `🔹 *!porramoto historial* : Resumen de GPs de la temporada\n` +
+      `🔹 *!porramoto ia* : Pronósticos de las IAs\n` +
+      `🔹 *!porramoto analizar* : Auditar tu apuesta con las IAs`;
   }
 
   return `🏁 *LA PORRA DE F1* 🏎️\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (P1 a P5)* y *1 piloto que sufrirá DNF (abandono)*.\n\n` +
+    `🎯 *Objetivo:* Acertar el *Top 5 de la carrera del domingo (P1 a P5)*, *1 piloto que sufrirá DNF (abandono)* y el *3º de la Clasificación (QP3)*.\n\n` +
     `📋 *CÓMO JUGAR (Antes de la Qualy):*\n` +
-    `Envía tu pronóstico con:\n` +
-    `👉 *!porra [P1] [P2] [P3] [P4] [P5] [DNF]*\n\n` +
+    `Envía tu pronóstico de 7 selecciones con:\n` +
+    `👉 *!porra [P1] [P2] [P3] [P4] [P5] [DNF] [QP3]*\n\n` +
     `*Ejemplos válidos:*\n` +
-    `🔹 *!porra ver nor lec pia rus dnf: ham*\n` +
-    `🔹 *!porra verstappen norris leclerc piastri russell hamilton*\n` +
-    `🔹 *!porra p1: ver p2: nor p3: lec p4: pia p5: rus dnf colapinto*\n\n` +
+    `🔹 *!porra ver nor lec pia rus dnf: col qp3: alo*\n` +
+    `🔹 *!porra verstappen norris leclerc piastri russell colapinto alonso*\n` +
+    `🔹 *!porra p1: ver p2: nor p3: lec p4: pia p5: rus dnf colapinto qp3 alonso*\n\n` +
     `🤖 *COMPETIDORES IA (Gemini):*\n` +
     `*Jarvis AI* y *Pitwall AI* compiten en el grupo analizando la telemetría de libres.\n\n` +
-    `🏆 *SISTEMA DE PUNTUACIÓN (Máx 18 pts por GP):*\n` +
-    `• *+3 pts* : Por cada posición exacta acertada en el Top 5 (P1, P2, P3, P4 o P5).\n` +
+    `🏆 *SISTEMA DE PUNTUACIÓN (Mismo sistema para Carrera y QP3, máx 21 pts):*\n` +
+    `• *+3 pts* : Por cada posición exacta acertada en el Top 5 de la carrera (P1 a P5).\n` +
     `• *+2 pts* : Si el piloto termina en el Top 5 a *solo 1 puesto* de distancia de tu predicción.\n` +
     `• *+1 pt*  : Si el piloto termina en el Top 5 a *2 o más puestos* de distancia.\n` +
     `• *+3 pts* : Si aciertas el piloto que abandona la carrera (DNF).\n` +
+    `• ⏱️ *P3 Clasificación (mismo sistema):*\n` +
+    `  - *+3 pts* : Si el piloto clasifica exactamente en *3ª posición (P3)*.\n` +
+    `  - *+2 pts* : Si clasifica a *solo 1 puesto de distancia* (P2 o P4 en Qualy).\n` +
+    `  - *+1 pt*  : Si clasifica dentro del *Top 5 de Qualy* a ±2 puestos (P1 o 5º en Qualy).\n` +
     `• 📈 *Clasificación General:* Se ordena por la *suma total de todos los puntos* conseguidos en cada GP.\n` +
     `• ⏱️ *Desempates:* En caso de empate a puntos, gana quien haya sellado antes su pronóstico definitivo.\n\n` +
     `⏳ *Límite:* Las apuestas se cierran al comenzar la Clasificación (Q1) del sábado.\n` +
-    `🚫 *Regla anti-copia:*\n` +
-    `• Máximo 4 posiciones exactas de coincidencia con otro jugador humano del grupo (máx 4 de 6). Puedes usar los mismos pilotos si cambias el orden.\n\n` +
-    `📊 *COMANDOS DISPONIBLES:*\n` +
-    `🔹 *!porra [apuesta]* : Enviar o modificar tu apuesta\n` +
-    `🔹 *!porra analizar* : Auditoría de tu apuesta con Jarvis AI y Pitwall AI\n` +
-    `🔹 *!porra ver* : Ver las apuestas del grupo (incluyendo a las IAs)\n` +
-    `🔹 *!porra ia* : Ver el estado/pronósticos de Jarvis AI y Pitwall AI\n` +
-    `🔹 *!porra resultados* : Calcular puntos, podio gráfico y radio tras la carrera\n` +
-    `🔹 *!porra historial* : Resumen de todos los GPs jugados en la temporada\n` +
-    `🔹 *!porra tabla* : Clasificación general de la temporada\n\n` +
-    `💡 _Para MotoGP usa *!porra moto* o *!porramoto*._`;
+    `🚫 *Reglas anti-copia (solo aplican a Carrera: Top 5 + DNF):*\n` +
+    `• 🚫 *Máximo 3 posiciones exactas en el Top 5* de coincidencia con otro participante (máx 3 de 5).\n` +
+    `• 🚫 *Prohibido coincidir en la predicción DNF* (no puedes elegir el mismo piloto DNF que otro jugador).\n` +
+    `• ℹ️ _En la predicción de P3 de Clasificación (QP3) no se aplica regla anti-copia._\n\n` +
+    `📊 *COMANDOS DE LA PORRA (F1):*\n` +
+    `🔹 *!porra [1º..5º] [DNF] [QP3]* : Enviar o editar apuesta\n` +
+    `🔹 *!porra ver* : Ver apuestas del grupo\n` +
+    `🔹 *!porra puntos* : Calcular resultados y podio del GP\n` +
+    `🔹 *!porra tabla* : Clasificación general (suma de puntos)\n` +
+    `🔹 *!porra historial* : Resumen de GPs de la temporada\n` +
+    `🔹 *!porra ia* : Pronósticos de las IAs\n` +
+    `🔹 *!porra analizar* : Auditar tu apuesta con las IAs\n\n` +
+    `💡 _Para MotoGP usa *!porramoto* (o *!porra moto*)._`;
 }
 
 export const PORRA_RULES_MESSAGE = getPorraRulesMessage("f1");
@@ -128,10 +141,11 @@ export interface ParsedPorra {
   p4: DriverEntry;
   p5: DriverEntry;
   dnf: DriverEntry;
+  qualyP3: DriverEntry;
 }
 
 /**
- * Interpreta los argumentos de la porra (Top 5 + DNF) tanto para F1 como para MotoGP
+ * Interpreta los argumentos de la porra (Top 5 Carrera + DNF + P3 Clasificación) tanto para F1 como para MotoGP
  */
 export function parsePorraArgs(
   rawArgs: string[],
@@ -141,9 +155,9 @@ export function parsePorraArgs(
   if (!fullText) {
     return {
       error: `❓ *Faltan datos en tu pronóstico de ${sport === "motogp" ? "MotoGP" : "F1"}.*\n\n` +
-        `Debes indicar los 5 pilotos para el Top 5 (1º al 5º) y 1 piloto para DNF (abandono).\n` +
-        `👉 *Formato:* \`!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]\`\n` +
-        `👉 *Ejemplo:* ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
+        `Debes indicar los 5 pilotos para el Top 5 de la carrera (1º al 5º), 1 piloto para DNF (abandono) y 1 piloto para P3 en Clasificación (QP3).\n` +
+        `👉 *Formato:* \`!porra${sport === "motogp" ? "moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]\`\n` +
+        `👉 *Ejemplo:* ${sport === "motogp" ? "`!porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales`" : "`!porra ver nor lec pia rus dnf: col qp3: alo`"}`,
     };
   }
 
@@ -158,23 +172,35 @@ export function parsePorraArgs(
   };
 
   let dnfDriver: DriverEntry | null = null;
-  let textWithoutDnf =
+  let qualyP3Driver: DriverEntry | null = null;
+  let textToParse =
     sport === "motogp"
       ? collapseCompoundRiderNames(fullText)
       : collapseCompoundDriverNames(fullText);
 
   // 1. Detectar etiqueta explícita de DNF (ej: "dnf: ham", "dnf hamilton", "abandono: stroll", "caida binder")
   const dnfRegex = /(?:dnf|abandono|ret|out|caida|caída)[:\s]+([a-zA-Z0-9_\-]+)/i;
-  const dnfMatch = textWithoutDnf.match(dnfRegex);
+  const dnfMatch = textToParse.match(dnfRegex);
   if (dnfMatch) {
     const candidate = finder(dnfMatch[1]);
     if (candidate) {
       dnfDriver = candidate;
-      textWithoutDnf = textWithoutDnf.replace(dnfMatch[0], " ");
+      textToParse = textToParse.replace(dnfMatch[0], " ");
     }
   }
 
-  // 2. Extraer etiquetas posicionales explícitas (ej: p1: ver, 1º norris, etc.)
+  // 2. Detectar etiqueta explícita de P3 en Clasificación (ej: "qp3: alo", "q3 alonso", "qualy: sainz", "p3q: marquez")
+  const qualyP3Regex = /(?:qp3|q3|qualy3|qualy|p3q|clasif3|clasificacion|clasif)[:\s]+([a-zA-Z0-9_\-]+)/i;
+  const qualyP3Match = textToParse.match(qualyP3Regex);
+  if (qualyP3Match) {
+    const candidate = finder(qualyP3Match[1]);
+    if (candidate) {
+      qualyP3Driver = candidate;
+      textToParse = textToParse.replace(qualyP3Match[0], " ");
+    }
+  }
+
+  // 3. Extraer etiquetas posicionales explícitas para carrera (ej: p1: ver, 1º norris, etc.)
   let p1: DriverEntry | null = null;
   let p2: DriverEntry | null = null;
   let p3: DriverEntry | null = null;
@@ -185,7 +211,7 @@ export function parsePorraArgs(
   let posMatch: RegExpExecArray | null;
   const matchedPositions = new Set<number>();
 
-  while ((posMatch = posRegex.exec(textWithoutDnf)) !== null) {
+  while ((posMatch = posRegex.exec(textToParse)) !== null) {
     const posNum = parseInt(posMatch[1], 10);
     const candidate = finder(posMatch[2]);
     if (candidate && !matchedPositions.has(posNum)) {
@@ -200,53 +226,69 @@ export function parsePorraArgs(
 
   // Limpiar tokens posicionales ya consumidos
   if (matchedPositions.size > 0) {
-    textWithoutDnf = textWithoutDnf.replace(posRegex, " ");
+    textToParse = textToParse.replace(posRegex, " ");
   }
 
-  // 3. Obtener tokens restantes
-  const tokens = textWithoutDnf.split(/\s+/).filter(Boolean);
+  // 4. Obtener tokens restantes
+  const tokens = textToParse.split(/\s+/).filter(Boolean);
   const remainingDrivers: DriverEntry[] = [];
 
   for (const tok of tokens) {
-    const cleanTok = tok.replace(/^(p[1-5]|dnf|1º|2º|3º|4º|5º)[:.]*/i, "");
+    const cleanTok = tok.replace(/^(p[1-5]|dnf|qp3|q3|qualy|1º|2º|3º|4º|5º)[:.]*/i, "");
     const d = finder(cleanTok || tok);
     if (d) {
       remainingDrivers.push(d);
     }
   }
 
-  // Asignar los puestos vacantes
+  // Asignar los puestos vacantes del Top 5
   if (!p1 && remainingDrivers.length > 0) p1 = remainingDrivers.shift()!;
   if (!p2 && remainingDrivers.length > 0) p2 = remainingDrivers.shift()!;
   if (!p3 && remainingDrivers.length > 0) p3 = remainingDrivers.shift()!;
   if (!p4 && remainingDrivers.length > 0) p4 = remainingDrivers.shift()!;
   if (!p5 && remainingDrivers.length > 0) p5 = remainingDrivers.shift()!;
 
-  // Si no había DNF explícito y sobró un piloto, es el DNF
+  // Si no había DNF explícito y sobran pilotos, el siguiente es DNF
   if (!dnfDriver && remainingDrivers.length > 0) {
     dnfDriver = remainingDrivers.shift()!;
   }
 
-  // Validar que tengamos los 5 puestos y el DNF
+  // Si no había Qualy P3 explícito y sobran pilotos, el siguiente es QP3
+  if (!qualyP3Driver && remainingDrivers.length > 0) {
+    qualyP3Driver = remainingDrivers.shift()!;
+  }
+
+  // Validar Top 5
   if (!p1 || !p2 || !p3 || !p4 || !p5) {
     return {
       error: `❓ *Faltan posiciones en tu Top 5 de ${sport === "motogp" ? "MotoGP" : "F1"}.*\n\n` +
         `Has indicado: 1º ${p1?.name || "❌"} | 2º ${p2?.name || "❌"} | 3º ${p3?.name || "❌"} | 4º ${p4?.name || "❌"} | 5º ${p5?.name || "❌"}\n` +
         `👉 Debes elegir 5 pilotos distintos para el Top 5.\n` +
-        `👉 Ejemplo: ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
+        `👉 Ejemplo: ${sport === "motogp" ? "`!porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales`" : "`!porra ver nor lec pia rus dnf: col qp3: alo`"}`,
     };
   }
 
+  // Validar DNF
   if (!dnfDriver) {
     return {
       error: `❓ *Falta indicar el piloto para DNF (abandono/caída).*\n\n` +
         `Indica quién crees que no terminará la carrera.\n` +
-        `👉 Añade \`dnf: [piloto]\` al final de tu apuesta.\n` +
-        `👉 Ejemplo: ${sport === "motogp" ? "`!porra moto marquez martin bagnaia acosta bastianini dnf: binder`" : "`!porra ver nor lec pia rus dnf: ham`"}`,
+        `👉 Añade \`dnf: [piloto]\` a tu apuesta.\n` +
+        `👉 Ejemplo: ${sport === "motogp" ? "`!porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales`" : "`!porra ver nor lec pia rus dnf: col qp3: alo`"}`,
     };
   }
 
-  // Validar duplicados en Top 5
+  // Validar Qualy P3
+  if (!qualyP3Driver) {
+    return {
+      error: `❓ *Falta indicar el piloto para P3 en Clasificación (QP3).*\n\n` +
+        `Indica quién crees que clasificará 3º en la sesión de clasificación del sábado.\n` +
+        `👉 Añade \`qp3: [piloto]\` al final de tu apuesta (o inclúyelo como 7º piloto).\n` +
+        `👉 Ejemplo: ${sport === "motogp" ? "`!porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales`" : "`!porra ver nor lec pia rus dnf: col qp3: alo`"}`,
+    };
+  }
+
+  // Validar duplicados en Top 5 de carrera
   const top5Ids = [p1.id, p2.id, p3.id, p4.id, p5.id];
   const uniqueTop5 = new Set(top5Ids);
   if (uniqueTop5.size < 5) {
@@ -255,10 +297,10 @@ export function parsePorraArgs(
     };
   }
 
-  // Validar que el DNF no esté en el Top 5
+  // Validar que el DNF de carrera no esté en el Top 5 de carrera
   if (uniqueTop5.has(dnfDriver.id)) {
     return {
-      error: `⚠️ *El piloto elegido como DNF (${dnfDriver.name}) no puede estar en tu Top 5.* Si termina en el Top 5 no habrá abandonado la carrera.`,
+      error: `⚠️ *El piloto elegido como DNF (${dnfDriver.name}) no puede estar en tu Top 5 de carrera.* Si termina en el Top 5 no habrá abandonado.`,
     };
   }
 
@@ -270,6 +312,7 @@ export function parsePorraArgs(
       p4,
       p5,
       dnf: dnfDriver,
+      qualyP3: qualyP3Driver,
     },
   };
 }
@@ -305,8 +348,8 @@ export async function handlePorraCommand(
     return showGroupBets(groupJid, sport);
   }
 
-  // 3. Ver clasificación general de la temporada
-  if (subCommand === "tabla" || subCommand === "ranking" || subCommand === "clasificacion" || subCommand === "puntos") {
+  // 3. Ver clasificación general de la temporada (suma de todos los puntos)
+  if (subCommand === "tabla" || subCommand === "ranking" || subCommand === "clasificacion" || subCommand === "general") {
     return showSeasonRanking(groupJid, sport);
   }
 
@@ -315,8 +358,8 @@ export async function handlePorraCommand(
     return showGPHistorial(groupJid, sport);
   }
 
-  // 4. Calcular resultados y podio del GP
-  if (subCommand === "resultados" || subCommand === "resultado" || subCommand === "calcular" || subCommand === "ganador") {
+  // 4. Calcular puntos/resultados y podio del GP
+  if (subCommand === "puntos" || subCommand === "resultados" || subCommand === "resultado" || subCommand === "calcular" || subCommand === "ganador") {
     return calculatePorraResults(groupJid, sport);
   }
 
@@ -425,6 +468,8 @@ export async function handlePorraCommand(
           p5Driver: parsed.p5.id,
           dnfName: parsed.dnf.name,
           dnfDriver: parsed.dnf.id,
+          qualyP3Name: parsed.qualyP3.name,
+          qualyP3Driver: parsed.qualyP3.id,
         };
       } else {
         const userBet = await prisma.porraBet.findUnique({
@@ -442,9 +487,9 @@ export async function handlePorraCommand(
         if (!userBet) {
           return `❓ *No tienes ninguna apuesta registrada aún para el ${raceName} (${sport.toUpperCase()})*.\n\n` +
             `👉 Envía primero tu apuesta con:\n` +
-            `*!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]*\n\n` +
+            `*!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n\n` +
             `O analiza una idea escribiendo:\n` +
-            `*!porra${sport === "motogp" ? " moto" : ""} analizar [1º] [2º] [3º] [4º] [5º] [DNF]*`;
+            `*!porra${sport === "motogp" ? " moto" : ""} analizar [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*`;
         }
         betToAnalyze = userBet;
       }
@@ -512,7 +557,7 @@ async function registerPorraBet(
     return `🔒 *¡APUESTAS CERRADAS!* La Clasificación del *${raceName}* ya ha comenzado. Ya no se pueden enviar ni modificar pronósticos para este Gran Premio.`;
   }
 
-  // REGLA ANTI-COPIA (solo compara contra otros participantes humanos, nunca contra las IAs)
+  // REGLAS ANTI-COPIA (solo compara contra otros participantes humanos, nunca contra las IAs)
   const otherBets = await prisma.porraBet.findMany({
     where: {
       sport,
@@ -526,42 +571,51 @@ async function registerPorraBet(
   });
 
   for (const other of otherBets) {
-    let exactMatches = 0;
+    // Regla 1: Prohibido coincidir en la predicción DNF
+    if (other.dnfDriver === parsed.dnf.id) {
+      return (
+        `⚠️ *¡PRONÓSTICO INVÁLIDO POR DNF REPETIDO!* 🚫\n` +
+        `━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Por reglamento anti-copia, *está prohibido coincidir en la predicción DNF* con otro participante.\n\n` +
+        `• 💥 *${other.userName}* ya ha elegido a *${parsed.dnf.name}* como DNF.\n\n` +
+        `👉 Elige a otro piloto distinto para tu predicción de abandono (DNF).`
+      );
+    }
+
+    // Regla 2: Límite de coincidencias exactas en máximo 3 del Top 5 (en QP3 no aplica regla anti-copia)
+    let exactTop5Matches = 0;
     const matchDetails: string[] = [];
 
     if (other.p1Driver === parsed.p1.id) {
-      exactMatches++;
+      exactTop5Matches++;
       matchDetails.push(`1º: ${parsed.p1.name}`);
     }
     if (other.p2Driver === parsed.p2.id) {
-      exactMatches++;
+      exactTop5Matches++;
       matchDetails.push(`2º: ${parsed.p2.name}`);
     }
     if (other.p3Driver === parsed.p3.id) {
-      exactMatches++;
+      exactTop5Matches++;
       matchDetails.push(`3º: ${parsed.p3.name}`);
     }
     if (other.p4Driver === parsed.p4.id) {
-      exactMatches++;
+      exactTop5Matches++;
       matchDetails.push(`4º: ${parsed.p4.name}`);
     }
     if (other.p5Driver === parsed.p5.id) {
-      exactMatches++;
+      exactTop5Matches++;
       matchDetails.push(`5º: ${parsed.p5.name}`);
     }
-    if (other.dnfDriver === parsed.dnf.id) {
-      exactMatches++;
-      matchDetails.push(`DNF: ${parsed.dnf.name}`);
-    }
 
-    // Regla única: Máximo 4 aciertos exactos de 6 (si coincide en 5 o 6 puestos exactos, se rechaza)
-    if (exactMatches > 4) {
-      return `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIA!* 🚫\n` +
+    if (exactTop5Matches > 3) {
+      return (
+        `⚠️ *¡PRONÓSTICO INVÁLIDO POR COINCIDENCIAS EXACTAS EN EL TOP 5!* 🚫\n` +
         `━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Por reglamento anti-copia, *no puedes coincidir en más de 4 pronósticos exactos* con otro participante del grupo (máximo 4 de 6).\n\n` +
-        `Coincides en *${exactMatches} de 6* predicciones exactas con *${other.userName}*:\n` +
+        `Por reglamento anti-copia, *no puedes coincidir en más de 3 posiciones exactas del Top 5* con otro participante del grupo (máximo 3 de 5).\n\n` +
+        `Coincides en *${exactTop5Matches} de 5* posiciones exactas del Top 5 con *${other.userName}*:\n` +
         `• ${matchDetails.join("\n• ")}\n\n` +
-        `👉 Modifica al menos ${exactMatches - 4} posición(es) o el DNF para diferenciar tu apuesta.`;
+        `👉 Modifica al menos ${exactTop5Matches - 3} posición(es) de tu Top 5 para validar tu apuesta.`
+      );
     }
   }
 
@@ -596,6 +650,8 @@ async function registerPorraBet(
       p5Name: parsed.p5.name,
       dnfDriver: parsed.dnf.id,
       dnfName: parsed.dnf.name,
+      qualyP3Driver: parsed.qualyP3.id,
+      qualyP3Name: parsed.qualyP3.name,
     },
     update: {
       userName,
@@ -612,25 +668,30 @@ async function registerPorraBet(
       p5Name: parsed.p5.name,
       dnfDriver: parsed.dnf.id,
       dnfName: parsed.dnf.name,
+      qualyP3Driver: parsed.qualyP3.id,
+      qualyP3Name: parsed.qualyP3.name,
       points: null,
       breakdown: null,
     },
   });
 
   const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
-  return `✅ *¡PRONÓSTICO REGISTRADO!* 🏁${sportIcon}\n` +
+  return (
+    `✅ *¡PRONÓSTICO REGISTRADO!* 🏁${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `👤 *Participante:* ${userName}\n` +
     `🏆 *Gran Premio:* ${raceName} (${sport.toUpperCase()})\n\n` +
-    `🎯 *Tus predicciones:*\n` +
+    `🎯 *Tus predicciones (7 selecciones):*\n` +
     `• *1º:* ${parsed.p1.name}\n` +
     `• *2º:* ${parsed.p2.name}\n` +
     `• *3º:* ${parsed.p3.name}\n` +
-    `• *4:* ${parsed.p4.name}\n` +
+    `• *4º:* ${parsed.p4.name}\n` +
     `• *5º:* ${parsed.p5.name}\n` +
     `• 💥 *DNF (Abandono):* ${parsed.dnf.name}\n` +
+    `• ⏱️ *P3 Clasificación:* ${parsed.qualyP3.name}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `💡 _Consulta todas las apuestas del grupo con *!porra${sport === "motogp" ? " moto" : ""} ver*._`;
+    `💡 _Consulta todas las apuestas del grupo con *!porra${sport === "motogp" ? " moto" : ""} ver*._`
+  );
 }
 
 export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "f1"): Promise<string> {
@@ -706,7 +767,7 @@ export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "
       `━━━━━━━━━━━━━━━━━━━━━\n` +
       `_Aún no hay apuestas registradas en este grupo para ${sport.toUpperCase()}._\n\n` +
       `👉 ¡Sé el primero en enviar tu pronóstico!\n` +
-      `Usa: *!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF]*`;
+      `Usa: *!porra${sport === "motogp" ? " moto" : ""} [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*`;
 
     if (!windowStatus.isOpen && !windowStatus.isClosed) {
       emptyMsg += `\n\n🤖 _*Jarvis AI* y *Pitwall AI* publicarán sus pronósticos 2h antes de la Qualy tras analizar los entrenamientos._`;
@@ -719,9 +780,8 @@ export async function showGroupBets(groupJid: string, sport: "f1" | "motogp" = "
 
   for (const bet of bets) {
     msg += `👤 *${bet.userName}:*\n` +
-      `  • 1º: ${bet.p1Name} | 2º: ${bet.p2Name} | 3º: ${bet.p3Name}\n` +
-      `  • 4º: ${bet.p4Name} | 5º: ${bet.p5Name}\n` +
-      `  • 💥 DNF: ${bet.dnfName}\n\n`;
+      `  • Top 5: 1º ${bet.p1Name} | 2º ${bet.p2Name} | 3º ${bet.p3Name} | 4º ${bet.p4Name} | 5º ${bet.p5Name}\n` +
+      `  • 💥 DNF: ${bet.dnfName} | ⏱️ P3 Qualy: ${bet.qualyP3Name || "No registrado"}\n\n`;
   }
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -740,13 +800,15 @@ export interface BetHitStats {
   closeHits: number;
   top5PartialHits: number;
   dnfHit: boolean;
+  qualyHits: number;
 }
 
 export function formatBetBreakdown(
   exactItems: Array<{ pos: number; driverName: string }>,
   closeItems: Array<{ predPos: number; realPos: number; driverName: string }>,
   partialItems: Array<{ driverName: string }>,
-  dnfItem: { hit: boolean; driverName: string }
+  dnfItem: { hit: boolean; driverName: string },
+  qualyItem?: { pts: number; text: string } | null
 ): string {
   const details: string[] = [];
   for (const item of exactItems) {
@@ -763,18 +825,22 @@ export function formatBetBreakdown(
   } else {
     details.push(`+0 DNF (${dnfItem.driverName} terminó)`);
   }
+  if (qualyItem) {
+    details.push(qualyItem.text);
+  }
   return details.length > 0 ? details.join(", ") : "Sin aciertos puntuables";
 }
 
 export function extractBetStats(breakdown: string | null | undefined): BetHitStats {
   if (!breakdown) {
-    return { exactHits: 0, closeHits: 0, top5PartialHits: 0, dnfHit: false };
+    return { exactHits: 0, closeHits: 0, top5PartialHits: 0, dnfHit: false, qualyHits: 0 };
   }
   const exactHits = (breakdown.match(/\+3 P[1-5]/g) || []).length;
   const closeHits = (breakdown.match(/\+2 Casi exacto/g) || []).length;
   const top5PartialHits = (breakdown.match(/\+1 Top5/g) || []).length;
   const dnfHit = breakdown.includes("+3 DNF");
-  return { exactHits, closeHits, top5PartialHits, dnfHit };
+  const qualyHits = breakdown.includes("+3 P3 Qualy exacto") ? 1 : 0;
+  return { exactHits: exactHits + qualyHits, closeHits, top5PartialHits, dnfHit, qualyHits };
 }
 
 export async function calculatePorraResults(
@@ -786,6 +852,7 @@ export async function calculatePorraResults(
   let raceName = "Gran Premio";
   let top5Official: DriverEntry[] = [];
   let officialDnfs: DriverEntry[] = [];
+  let qualyTop5Official: DriverEntry[] = [];
 
   if (sport === "motogp") {
     const motoData = await getLastMotoGPResultsData();
@@ -797,6 +864,7 @@ export async function calculatePorraResults(
     raceName = motoData.raceName;
     top5Official = motoData.top5;
     officialDnfs = motoData.dnfs;
+    qualyTop5Official = motoData.qualyTop5 || [];
   } else {
     try {
       const race = await fetchLastF1RaceData();
@@ -823,6 +891,18 @@ export async function calculatePorraResults(
         id: r.Driver.driverId,
         name: `${r.Driver.givenName} ${r.Driver.familyName}`,
       }));
+
+      // Obtener resultados de la sesión de clasificación de F1
+      try {
+        const qualyRace = await fetchLastF1QualifyingData(season, round);
+        const qResults = qualyRace?.QualifyingResults || [];
+        qualyTop5Official = qResults.slice(0, 5).map((q: any) => ({
+          id: q.Driver.driverId,
+          name: `${q.Driver.givenName} ${q.Driver.familyName}`,
+        }));
+      } catch (err: any) {
+        console.error("Error obteniendo resultados de qualy F1:", err?.message);
+      }
     } catch (err: any) {
       console.error("Error consultando resultados oficiales F1:", err?.message);
       return { text: "⚠️ Error al obtener los resultados oficiales de la carrera de F1." };
@@ -894,16 +974,42 @@ export async function calculatePorraResults(
       }
     }
 
-    // DNF
+    // DNF en Carrera
     const dnfHit = dnfIds.has(bet.dnfDriver);
     if (dnfHit) {
       pts += 3;
     }
 
-    const breakdownText = formatBetBreakdown(exactItems, closeItems, partialItems, {
-      hit: dnfHit,
-      driverName: bet.dnfName,
-    });
+    // P3 en Clasificación (mismo sistema de puntuación: +3 exacto, +2 a ±1 puesto, +1 en Top 5 Qualy)
+    let qualyItem: { pts: number; text: string } | null = null;
+    if (bet.qualyP3Driver && qualyTop5Official.length > 0) {
+      const qualyTop5Ids = qualyTop5Official.map((d) => d.id);
+      const qRealIndex = qualyTop5Ids.indexOf(bet.qualyP3Driver);
+      if (qRealIndex !== -1) {
+        const qRealPos = qRealIndex + 1; // 1..5
+        const qDiff = Math.abs(3 - qRealPos); // El objetivo es P3
+        if (qDiff === 0) {
+          pts += 3;
+          qualyItem = { pts: 3, text: `+3 P3 Qualy exacto (${bet.qualyP3Name})` };
+        } else if (qDiff === 1) {
+          pts += 2;
+          qualyItem = { pts: 2, text: `+2 Casi exacto P3 Qualy→P${qRealPos} (${bet.qualyP3Name})` };
+        } else {
+          pts += 1;
+          qualyItem = { pts: 1, text: `+1 Top 5 Qualy P${qRealPos} (${bet.qualyP3Name})` };
+        }
+      } else {
+        qualyItem = { pts: 0, text: `+0 P3 Qualy (${bet.qualyP3Name} fuera Top 5 Qualy)` };
+      }
+    }
+
+    const breakdownText = formatBetBreakdown(
+      exactItems,
+      closeItems,
+      partialItems,
+      { hit: dnfHit, driverName: bet.dnfName },
+      qualyItem
+    );
 
     // Preservar updatedAt original del pronóstico para no alterar los desempates al recalcular
     await prisma.porraBet.update({
@@ -932,16 +1038,18 @@ export async function calculatePorraResults(
 
   const sportIcon = sport === "motogp" ? "🏍️" : "🏎️";
   const dnfsStr = officialDnfs.length > 0 ? officialDnfs.map((d) => d.name).join(", ") : "Ninguno";
+  const qualyP3OfficialName = qualyTop5Official[2] ? qualyTop5Official[2].name : "Pendiente de confirmación";
 
   let msg = `🏁 *RESULTADOS OFICIALES - ${raceName.toUpperCase()}* ${sportIcon}\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `📊 *Llegada oficial real:*\n` +
+    `📊 *Resultados oficiales reales:*\n` +
     `• 1º: *${top5Official[0].name}*\n` +
     `• 2º: *${top5Official[1].name}*\n` +
     `• 3º: *${top5Official[2].name}*\n` +
     `• 4º: *${top5Official[3].name}*\n` +
     `• 5º: *${top5Official[4].name}*\n` +
     `• 💥 Abandonos (DNF): *${dnfsStr}*\n` +
+    `• ⏱️ P3 Clasificación: *${qualyP3OfficialName}*\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `🏆 *PODIO DE LA JORNADA:*\n\n`;
 

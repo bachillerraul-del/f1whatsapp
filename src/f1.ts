@@ -10,6 +10,7 @@ interface CacheEntry<T> {
 
 let nextRaceCache: CacheEntry<any> | null = null;
 let lastRaceCache: CacheEntry<any> | null = null;
+let lastQualyCache: CacheEntry<any> | null = null;
 
 export async function fetchNextF1RaceData(): Promise<any | null> {
   const now = Date.now();
@@ -35,6 +36,27 @@ export async function fetchLastF1RaceData(): Promise<any | null> {
     lastRaceCache = { data: race, expiresAt: now + CACHE_TTL_MS };
   }
   return race;
+}
+
+export async function fetchLastF1QualifyingData(season?: number, round?: number): Promise<any | null> {
+  const now = Date.now();
+  if (!season && !round && lastQualyCache && lastQualyCache.expiresAt > now) {
+    return lastQualyCache.data;
+  }
+  const endpoint = season && round
+    ? `${JOLPICA_BASE}/${season}/${round}/qualifying.json`
+    : `${JOLPICA_BASE}/current/last/qualifying.json`;
+  try {
+    const res = await axios.get(endpoint, { timeout: 10000 });
+    const race = res.data.MRData?.RaceTable?.Races?.[0] || null;
+    if (race && !season && !round) {
+      lastQualyCache = { data: race, expiresAt: now + CACHE_TTL_MS };
+    }
+    return race;
+  } catch (err: any) {
+    console.error("Error fetching F1 qualifying data:", err?.message);
+    return null;
+  }
 }
 
 // Helper to format dates explicitly to Spanish mainland time (Europe/Madrid)

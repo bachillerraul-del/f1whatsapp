@@ -349,6 +349,7 @@ export interface MotoGPResultData {
   raceName: string;
   top5: Array<{ id: string; name: string }>;
   dnfs: Array<{ id: string; name: string }>;
+  qualyTop5: Array<{ id: string; name: string }>;
 }
 
 export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | null> {
@@ -413,12 +414,40 @@ export async function getLastMotoGPResultsData(): Promise<MotoGPResultData | nul
       }
     }
 
+    // Clasificación de la sesión de Q2 / Qualy
+    const qualyTop5: Array<{ id: string; name: string }> = [];
+    const qSession =
+      sessions.find((s: any) => s.type === "Q2") ||
+      sessions.find((s: any) => s.type === "Q" && s.number === 2) ||
+      sessions.find((s: any) => s.type === "Q1") ||
+      sessions.find((s: any) => s.type === "Q");
+
+    if (qSession) {
+      try {
+        const qClassRes = await axios.get(
+          `${BASE_URL}/results/session/${qSession.id}/classification?test=false`,
+          { timeout: 8000 }
+        );
+        const qList: any[] = qClassRes.data?.classification || [];
+        for (const item of qList.slice(0, 5)) {
+          const parsed = findRider(item.rider?.full_name);
+          qualyTop5.push({
+            id: parsed?.id || item.rider?.id || "unknown",
+            name: parsed?.name || item.rider?.full_name || "Piloto",
+          });
+        }
+      } catch (err: any) {
+        console.error("Error fetching MotoGP Q2 session classification:", err?.message);
+      }
+    }
+
     const resultData: MotoGPResultData = {
       season,
       round,
       raceName,
       top5,
       dnfs,
+      qualyTop5,
     };
 
     lastMotoGPResultsCache = { data: resultData, expiresAt: nowMs + MOTOGP_CACHE_TTL_MS };

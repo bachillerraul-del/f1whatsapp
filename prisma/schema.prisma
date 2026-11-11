@@ -56,12 +56,14 @@ model PorraBet {
   p4Name    String
   p5Driver  String
   p5Name    String
-  dnfDriver String   // driverId for DNF
-  dnfName   String   // display name for DNF
-  points    Int?     // total points won in this GP (null if pending)
-  breakdown String?  // points explanation
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  dnfDriver     String   // driverId for DNF
+  dnfName       String   // display name for DNF
+  qualyP3Driver String?  // driverId for Qualifying P3
+  qualyP3Name   String?  // display name for Qualifying P3
+  points        Int?     // total points won in this GP (null if pending)
+  breakdown     String?  // points explanation
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([sport, groupJid, season, round, userJid])
 }
