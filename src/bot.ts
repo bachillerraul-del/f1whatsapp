@@ -30,6 +30,7 @@ import {
   isSubscribed,
   isBotActiveInChat,
   setBotActiveInChat,
+  getAllKnownActiveChatJids,
   prisma,
 } from "./db.js";
 import { setupAlerts, runAlertsCycle } from "./alerts.js";
@@ -283,24 +284,53 @@ export async function startBot() {
       console.log(`📩 [Comando detectado] "${cleanText}" de ${pushName} (${remoteJid})`);
 
       try {
-        // 1. CONTROL DEL BOT (!bot on / !bot off) — siempre accesible
+        // 1. CONTROL DEL BOT (!bot on / !bot off / !bot) — siempre accesible
         if (isBot) {
           const subCommand = cleanText.replace(/^!bot\s*/, "").trim();
           if (subCommand === "off" || subCommand === "desactivar") {
             await setBotActiveInChat(remoteJid, false);
+            const activeJids = await getAllKnownActiveChatJids();
             await sock.sendMessage(remoteJid, {
-              text: `🔴 *Bot desactivado en este chat.*\n\nYa no responderé a ningún comando aquí.\nPara volver a activarme, escribe *!bot on*.`,
+              text:
+                `🔴 *Bot desactivado en este chat.*\n\n` +
+                `Ya no responderé a comandos ni enviaré alertas aquí.\n` +
+                `📊 *Total de chats activos actualmente:* ${activeJids.length}\n` +
+                `Para volver a activarme, escribe *!bot on*.`,
             });
           } else if (subCommand === "on" || subCommand === "activar") {
             await setBotActiveInChat(remoteJid, true);
+            const activeJids = await getAllKnownActiveChatJids();
             await sock.sendMessage(remoteJid, {
-              text: `🟢 *¡Bot y alertas automáticas activados en este chat!*\n\nYa estoy operativo aquí. 🏎️🏍️\nEscribe *!ayuda* para ver los comandos disponibles.`,
+              text:
+                `🟢 *¡Bot y alertas automáticas activados en este chat!*\n\n` +
+                `Ya estoy operativo aquí. 🏎️🏍️\n` +
+                `📊 *Total de chats activos actualmente:* ${activeJids.length}\n` +
+                `Escribe *!ayuda* para ver los comandos disponibles.`,
             });
             runAlertsCycle().catch(() => {});
           } else {
             const active = await isBotActiveInChat(remoteJid);
+            const activeJids = await getAllKnownActiveChatJids();
+            const chatDescriptions: string[] = [];
+
+            for (const jid of activeJids) {
+              if (jid.endsWith("@g.us")) {
+                try {
+                  const meta = await sock.groupMetadata(jid);
+                  chatDescriptions.push(`• 👥 *${meta.subject}*`);
+                } catch {
+                  chatDescriptions.push(`• 👥 Grupo (${jid.split("@")[0]})`);
+                }
+              } else {
+                chatDescriptions.push(`• 👤 Chat privado (${jid.split("@")[0]})`);
+              }
+            }
+
             await sock.sendMessage(remoteJid, {
-              text: `🤖 *Estado del bot en este chat:* ${active ? "🟢 Activado" : "🔴 Desactivado"}\n\n` +
+              text:
+                `🤖 *Estado del bot en este chat:* ${active ? "🟢 Activado" : "🔴 Desactivado"}\n` +
+                `📊 *Total de chats activos (${activeJids.length}):*\n` +
+                (chatDescriptions.length > 0 ? `${chatDescriptions.join("\n")}\n\n` : `_Ningún chat activo_\n\n`) +
                 `🔹 *!bot on* — Activar el bot y alertas en este chat\n` +
                 `🔹 *!bot off* — Desactivar el bot y alertas en este chat`,
             });
