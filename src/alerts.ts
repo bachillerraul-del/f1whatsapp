@@ -1,12 +1,9 @@
 import cron from "node-cron";
-import axios from "axios";
 import { getActiveSubscribers, wasAlertSent, markAlertSent, isBotActiveInChat } from "./db.js";
 import { getNextRace, fetchNextF1RaceData } from "./f1.js";
-import { getNextMotoGP } from "./motogp.js";
+import { getNextMotoGP, getNextMotoGPEventInfo } from "./motogp.js";
 import { ensureAIParticipants } from "./ai-participants.js";
 import type { WASocket } from "@whiskeysockets/baileys";
-
-const MOTOGP_BASE = "https://api.motogp.pulselive.com/motogp/v1";
 
 let activeSock: WASocket | null = null;
 let alertsCronTask: cron.ScheduledTask | null = null;
@@ -118,116 +115,74 @@ export function setupAlerts(sock: WASocket) {
     }
 
     // =========================================================
-    // 🏍️ 2. ALERTAS DE MOTOGP
+    // 🏍️ 2. ALERTAS DE MOTOGP (usando caché compartida)
     // =========================================================
     try {
-      const seasonsRes = await axios.get(`${MOTOGP_BASE}/results/seasons`, { timeout: 8000 });
-      const currentSeason =
-        seasonsRes.data.find((s: any) => s.current) ||
-        seasonsRes.data.find((s: any) => s.year === now.getFullYear()) ||
-        seasonsRes.data[0];
+      const motoInfo = await getNextMotoGPEventInfo();
 
-      if (currentSeason) {
-        const eventsRes = await axios.get(`${MOTOGP_BASE}/results/events?seasonUuid=${currentSeason.id}`, {
-          timeout: 8000,
-        });
-        const events: any[] = (eventsRes.data || []).filter((e: any) => !e.test);
+      if (motoInfo) {
+        // --- ALERTA 1 (MotoGP): 24h antes de la primera sesión (FP1) con horarios completos ---
+        if (motoInfo.fp1Date) {
+          const diffMinutes = Math.round((motoInfo.fp1Date.getTime() - now.getTime()) / (1000 * 60));
 
-        const nextEventIndex = events.findIndex((e: any) => {
-          const end = new Date(`${e.date_end}T23:59:59Z`);
-          return end >= now;
-        });
-        const nextEvent = nextEventIndex !== -1 ? events[nextEventIndex] : undefined;
-
-        if (nextEvent) {
-          const catRes = await axios.get(`${MOTOGP_BASE}/results/categories?seasonUuid=${currentSeason.id}`, {
-            timeout: 8000,
-          });
-          const motogpCat =
-            catRes.data.find((c: any) => c.name.toLowerCase().includes("motogp")) || catRes.data[0];
-
-          if (motogpCat) {
-            const sessionsRes = await axios.get(
-              `${MOTOGP_BASE}/results/sessions?eventUuid=${nextEvent.id}&categoryUuid=${motogpCat.id}`,
-              { timeout: 8000 }
-            );
-            const sessions: any[] = sessionsRes.data || [];
-
-            // Ordenar sesiones cronológicamente para detectar la primera sesión del GP
-            sessions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-            const firstSession =
-              sessions.find((s: any) => s.type === "FP" && s.number === 1) ||
-              sessions.find((s: any) => s.type === "FP1") ||
-              sessions[0];
-            const qualySession =
-              sessions.find((s: any) => s.type === "Q1") ||
-              sessions.find((s: any) => s.type === "Q" && s.number === 1) ||
-              sessions.find((s: any) => s.type === "Q2");
-            const raceSession = sessions.find((s: any) => s.type === "RAC");
-
-            // --- ALERTA 1 (MotoGP): 24h antes de la primera sesión (FP1) con horarios completos ---
-            if (firstSession?.date) {
-              const fp1Date = new Date(firstSession.date);
-              const diffMinutes = Math.round((fp1Date.getTime() - now.getTime()) / (1000 * 60));
-
-              if (diffMinutes >= 1380 && diffMinutes <= 1500) {
-                const alertKey = `motogp-${nextEvent.id}-24h-fp1`;
-                if (!(await wasAlertSent(alertKey))) {
-                  console.log(`🚀 [Alerta 1 MotoGP] 24h antes de la primera sesión para ${nextEvent.name}`);
-                  const schedulePreview = await getNextMotoGP();
-                  const message = `🚨 *¡EL GRAN PREMIO DE MOTOGP COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
-                  await broadcastAlert(currentSock, message);
-                  await markAlertSent(alertKey);
-                }
-              }
+          if (diffMinutes >= 1380 && diffMinutes <= 1500) {
+            const alertKey = `motogp-${motoInfo.eventId}-24h-fp1`;
+            if (!(await wasAlertSent(alertKey))) {
+              console.log(`🚀 [Alerta 1 MotoGP] 24h antes de la primera sesión para ${motoInfo.raceName}`);
+              const schedulePreview = await getNextMotoGP();
+              const message = `🚨 *¡EL GRAN PREMIO DE MOTOGP COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
+              await broadcastAlert(currentSock, message);
+              await markAlertSent(alertKey);
             }
+          }
+        }
 
-            // --- ALERTA 2 (MotoGP): 2 horas antes del cierre de apuestas (inicio de Clasificación Q1) ---
-            if (qualySession?.date) {
-              const qualyDate = new Date(qualySession.date);
-              const diffMinutes = Math.round((qualyDate.getTime() - now.getTime()) / (1000 * 60));
+        // --- ALERTA 2 (MotoGP): 2 horas antes del cierre de apuestas (inicio de Clasificación Q1) ---
+        if (motoInfo.qualyDate) {
+          const diffMinutes = Math.round((motoInfo.qualyDate.getTime() - now.getTime()) / (1000 * 60));
 
-              if (diffMinutes >= 105 && diffMinutes <= 135) {
-                const alertKey = `motogp-${nextEvent.id}-2h-qualy-porra`;
-                if (!(await wasAlertSent(alertKey))) {
-                  const eventName = nextEvent.sponsored_name || nextEvent.name || `GP Ronda ${nextEventIndex + 1}`;
-                  const seasonYear = new Date(nextEvent.date_start).getFullYear() || now.getFullYear();
-                  const roundNum = nextEventIndex + 1;
-                  const raceDateStr = raceSession?.date ? new Date(raceSession.date).toISOString() : undefined;
+          if (diffMinutes >= 105 && diffMinutes <= 135) {
+            const alertKey = `motogp-${motoInfo.eventId}-2h-qualy-porra`;
+            if (!(await wasAlertSent(alertKey))) {
+              const raceDateStr = motoInfo.raceDate ? motoInfo.raceDate.toISOString() : undefined;
 
-                  console.log(`🚀 [Alerta 2 MotoGP] 2h antes del cierre de apuestas para ${eventName}`);
+              console.log(`🚀 [Alerta 2 MotoGP] 2h antes del cierre de apuestas para ${motoInfo.raceName}`);
 
-                  const subscribers = await getActiveSubscribers();
-                  let aiSummary = "";
+              const subscribers = await getActiveSubscribers();
+              let aiSummary = "";
 
-                  for (const sub of subscribers) {
-                    try {
-                      const aiRes = await ensureAIParticipants("motogp", sub.jid, seasonYear, roundNum, eventName, {
-                        force: true,
-                        raceDateStr,
-                      });
-                      if (!aiSummary && aiRes.text) {
-                        aiSummary = aiRes.text;
-                      }
-                    } catch {
-                      // omit
+              for (const sub of subscribers) {
+                try {
+                  const aiRes = await ensureAIParticipants(
+                    "motogp",
+                    sub.jid,
+                    motoInfo.season,
+                    motoInfo.round,
+                    motoInfo.raceName,
+                    {
+                      force: true,
+                      raceDateStr,
                     }
+                  );
+                  if (!aiSummary && aiRes.text) {
+                    aiSummary = aiRes.text;
                   }
-
-                  const message = `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (MOTOGP)!* 🚨\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `🏍️ *${eventName}*\n` +
-                    `⏱️ La Clasificación (Q1) comienza en 2 horas.\n\n` +
-                    (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos.\n\n`) +
-                    `👉 ¡Última oportunidad para enviar o modificar tu apuesta de MotoGP!\n` +
-                    `Usa: *!porramoto [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
-                    `_Ejemplo: !porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales_\n\n` +
-                    `📊 Consulta las apuestas del grupo con *!porramoto ver*. 🏁`;
-                  await broadcastAlert(currentSock, message);
-                  await markAlertSent(alertKey);
+                } catch {
+                  // omit
                 }
               }
+
+              const message = `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (MOTOGP)!* 🚨\n` +
+                `━━━━━━━━━━━━━━━━━━━━━\n` +
+                `🏍️ *${motoInfo.raceName}*\n` +
+                `⏱️ La Clasificación (Q1) comienza en 2 horas.\n\n` +
+                (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos.\n\n`) +
+                `👉 ¡Última oportunidad para enviar o modificar tu apuesta de MotoGP!\n` +
+                `Usa: *!porramoto [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
+                `_Ejemplo: !porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales_\n\n` +
+                `📊 Consulta las apuestas del grupo con *!porramoto ver*. 🏁`;
+              await broadcastAlert(currentSock, message);
+              await markAlertSent(alertKey);
             }
           }
         }

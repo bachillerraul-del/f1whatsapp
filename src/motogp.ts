@@ -125,16 +125,29 @@ export async function getNextMotoGP(): Promise<string> {
   }
 }
 
+const MOTOGP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+let motoGPStandingsRawCache: { data: any[]; expiresAt: number } | null = null;
+
+async function fetchMotoGPStandingsRaw(): Promise<any[]> {
+  const nowMs = Date.now();
+  if (motoGPStandingsRawCache && motoGPStandingsRawCache.expiresAt > nowMs) {
+    return motoGPStandingsRawCache.data;
+  }
+  const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
+  const res = await axios.get(
+    `${BASE_URL}/results/standings?seasonUuid=${seasonUuid}&categoryUuid=${categoryUuid}`,
+    { timeout: 10000 }
+  );
+  const classification: any[] = res.data?.classification || [];
+  if (classification.length > 0) {
+    motoGPStandingsRawCache = { data: classification, expiresAt: nowMs + MOTOGP_CACHE_TTL_MS };
+  }
+  return classification;
+}
+
 export async function getMotoGPStandings(): Promise<string> {
   try {
-    const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
-
-    const res = await axios.get(
-      `${BASE_URL}/results/standings?seasonUuid=${seasonUuid}&categoryUuid=${categoryUuid}`,
-      { timeout: 10000 }
-    );
-
-    const classification: any[] = res.data?.classification || [];
+    const classification = await fetchMotoGPStandingsRaw();
     if (classification.length === 0) {
       return "📊 No hay datos de la clasificación de pilotos de MotoGP en este momento.";
     }
@@ -167,14 +180,7 @@ export async function getMotoGPStandings(): Promise<string> {
 
 export async function getMotoGPConstructors(): Promise<string> {
   try {
-    const { seasonUuid, categoryUuid } = await getSeasonAndCategory();
-
-    const res = await axios.get(
-      `${BASE_URL}/results/standings?seasonUuid=${seasonUuid}&categoryUuid=${categoryUuid}`,
-      { timeout: 10000 }
-    );
-
-    const classification: any[] = res.data?.classification || [];
+    const classification = await fetchMotoGPStandingsRaw();
     if (classification.length === 0) {
       return "📊 No hay datos de clasificación de constructores de MotoGP.";
     }
@@ -274,14 +280,15 @@ export async function getLastMotoGPResults(): Promise<string> {
 }
 
 export interface NextMotoGPInfo {
+  eventId: string;
   season: number;
   round: number;
   raceName: string;
+  fp1Date?: Date;
   qualyDate?: Date;
   raceDate?: Date;
 }
 
-const MOTOGP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 let nextMotoGPInfoCache: { data: NextMotoGPInfo; expiresAt: number } | null = null;
 let lastMotoGPResultsCache: { data: MotoGPResultData; expiresAt: number } | null = null;
 
@@ -313,14 +320,19 @@ export async function getNextMotoGPEventInfo(): Promise<NextMotoGPInfo | null> {
     const targetEvent = events[targetIndex];
     const season = new Date(targetEvent.date_start).getFullYear() || new Date().getFullYear();
     const round = targetIndex + 1;
-    const raceName = targetEvent.name || targetEvent.sponsored_name || `GP Ronda ${round}`;
+    const raceName = targetEvent.sponsored_name || targetEvent.name || `GP Ronda ${round}`;
 
     const sessionsRes = await axios.get(
       `${BASE_URL}/results/sessions?eventUuid=${targetEvent.id}&categoryUuid=${categoryUuid}`,
       { timeout: 10000 }
     );
     const sessions: any[] = sessionsRes.data || [];
+    sessions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+    const firstSession =
+      sessions.find((s: any) => s.type === "FP" && s.number === 1) ||
+      sessions.find((s: any) => s.type === "FP1") ||
+      sessions[0];
     const qualySession =
       sessions.find((s: any) => s.type === "Q1") ||
       sessions.find((s: any) => s.type === "Q" && s.number === 1) ||
@@ -328,11 +340,13 @@ export async function getNextMotoGPEventInfo(): Promise<NextMotoGPInfo | null> {
     const raceSession = sessions.find((s: any) => s.type === "RAC");
 
     const info: NextMotoGPInfo = {
+      eventId: String(targetEvent.id),
       season,
       round,
       raceName,
-      qualyDate: qualySession ? new Date(qualySession.date) : undefined,
-      raceDate: raceSession ? new Date(raceSession.date) : undefined,
+      fp1Date: firstSession?.date ? new Date(firstSession.date) : undefined,
+      qualyDate: qualySession?.date ? new Date(qualySession.date) : undefined,
+      raceDate: raceSession?.date ? new Date(raceSession.date) : undefined,
     };
 
     nextMotoGPInfoCache = { data: info, expiresAt: nowMs + MOTOGP_CACHE_TTL_MS };

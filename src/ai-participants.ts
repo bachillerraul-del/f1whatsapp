@@ -71,6 +71,8 @@ interface CompetitiveIntelligence {
 }
 
 const F1_CLASSIFIED_REGEX = /^(Finished|\+\d+\s*Laps?)$/i;
+const INTEL_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const intelCache = new Map<string, { data: CompetitiveIntelligence; expiresAt: number }>();
 
 /**
  * Construye un dossier de inteligencia competitiva para F1 combinando:
@@ -83,6 +85,13 @@ async function buildF1CompetitiveIntelligence(
   season: number,
   raceDateStr?: string
 ): Promise<CompetitiveIntelligence> {
+  const cacheKey = `f1-${season}-${raceName}`;
+  const nowMs = Date.now();
+  const cached = intelCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.data;
+  }
+
   let telemetryText = "";
 
   const champMap = new Map<
@@ -390,11 +399,15 @@ async function buildF1CompetitiveIntelligence(
   telemetryText += `\n4) SIMULACIÓN CUANTITATIVA DE VALOR ESPERADO (MODELO MONTE CARLO):\n  ${top8Model}\n`;
   telemetryText += `\n5) PILOTOS CON MAYOR PROBABILIDAD ESTADÍSTICA DE DNF (ABANDONO):\n  ${top5DnfModel}\n`;
 
-  return {
+  const result: CompetitiveIntelligence = {
     telemetryText,
     rankedCandidates,
     dnfCandidates,
   };
+  if (rankedCandidates.length > 0) {
+    intelCache.set(cacheKey, { data: result, expiresAt: Date.now() + INTEL_CACHE_TTL_MS });
+  }
+  return result;
 }
 
 /**
@@ -404,6 +417,13 @@ async function buildF1CompetitiveIntelligence(
  * 3. Resultados y caídas/abandonos (DNF) en los últimos 3 Grandes Premios (PulseLive)
  */
 async function buildMotoGPCompetitiveIntelligence(): Promise<CompetitiveIntelligence> {
+  const cacheKey = `motogp-${new Date().getFullYear()}`;
+  const nowMs = Date.now();
+  const cached = intelCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.data;
+  }
+
   let telemetryText = "";
 
   const champMap = new Map<
@@ -661,11 +681,15 @@ async function buildMotoGPCompetitiveIntelligence(): Promise<CompetitiveIntellig
   telemetryText += `\n3) SIMULACIÓN CUANTITATIVA DE VALOR ESPERADO (MODELO MONTE CARLO):\n  ${top8Model}\n`;
   telemetryText += `\n4) PILOTOS CON MAYOR TASA ESTADÍSTICA DE CAÍDA/DNF:\n  ${top5DnfModel}\n`;
 
-  return {
+  const result: CompetitiveIntelligence = {
     telemetryText,
     rankedCandidates,
     dnfCandidates,
   };
+  if (rankedCandidates.length > 0) {
+    intelCache.set(cacheKey, { data: result, expiresAt: Date.now() + INTEL_CACHE_TTL_MS });
+  }
+  return result;
 }
 
 /**

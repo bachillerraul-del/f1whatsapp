@@ -61,6 +61,8 @@ export async function pushSessionToDb() {
 
     const currentFilesSet = new Set(fileNames);
 
+    const pendingUpserts: Array<{ fileName: string; content: string }> = [];
+
     for (const fileName of fileNames) {
       const filePath = path.join(AUTH_DIR, fileName);
       const content = fs.readFileSync(filePath, "utf8");
@@ -68,28 +70,40 @@ export async function pushSessionToDb() {
       if (contentCache.get(fileName) === content) {
         continue;
       }
-
-      await prisma.sessionFile.upsert({
-        where: { id: fileName },
-        update: { content },
-        create: { id: fileName, content },
-      });
-
-      contentCache.set(fileName, content);
+      pendingUpserts.push({ fileName, content });
     }
 
-    // Limpiar de la caché y de la base de datos los archivos obsoletos que Baileys ya eliminó en disco
-    for (const cachedKey of contentCache.keys()) {
-      if (!currentFilesSet.has(cachedKey)) {
-        contentCache.delete(cachedKey);
+    if (pendingUpserts.length > 0) {
+      await prisma.$transaction(
+        pendingUpserts.map(({ fileName, content }) =>
+          prisma.sessionFile.upsert({
+            where: { id: fileName },
+            update: { content },
+            create: { id: fileName, content },
+          })
+        )
+      );
+      for (const { fileName, content } of pendingUpserts) {
+        contentCache.set(fileName, content);
       }
     }
 
-    await prisma.sessionFile.deleteMany({
-      where: {
-        id: { notIn: fileNames },
-      },
-    });
+    // Limpiar de la caché y de la base de datos los archivos obsoletos que Baileys ya eliminó en disco
+    let hasDeletedFiles = false;
+    for (const cachedKey of contentCache.keys()) {
+      if (!currentFilesSet.has(cachedKey)) {
+        contentCache.delete(cachedKey);
+        hasDeletedFiles = true;
+      }
+    }
+
+    if (hasDeletedFiles) {
+      await prisma.sessionFile.deleteMany({
+        where: {
+          id: { notIn: fileNames },
+        },
+      });
+    }
   } catch (err: any) {
     console.error("⚠️ Error sincronizando sesión a Supabase:", err?.message);
   }

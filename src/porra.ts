@@ -840,7 +840,7 @@ export function extractBetStats(breakdown: string | null | undefined): BetHitSta
   const top5PartialHits = (breakdown.match(/\+1 Top5/g) || []).length;
   const dnfHit = breakdown.includes("+3 DNF");
   const qualyHits = breakdown.includes("+3 P3 Qualy exacto") ? 1 : 0;
-  return { exactHits: exactHits + qualyHits, closeHits, top5PartialHits, dnfHit, qualyHits };
+  return { exactHits, closeHits, top5PartialHits, dnfHit, qualyHits };
 }
 
 export async function calculatePorraResults(
@@ -941,6 +941,7 @@ export async function calculatePorraResults(
   }
 
   const evaluated: EvaluatedUser[] = [];
+  const dbUpdates: Array< ReturnType<typeof prisma.porraBet.update> > = [];
 
   for (const bet of bets) {
     let pts = 0;
@@ -1012,14 +1013,16 @@ export async function calculatePorraResults(
     );
 
     // Preservar updatedAt original del pronóstico para no alterar los desempates al recalcular
-    await prisma.porraBet.update({
-      where: { id: bet.id },
-      data: {
-        points: pts,
-        breakdown: breakdownText,
-        updatedAt: bet.updatedAt,
-      },
-    });
+    dbUpdates.push(
+      prisma.porraBet.update({
+        where: { id: bet.id },
+        data: {
+          points: pts,
+          breakdown: breakdownText,
+          updatedAt: bet.updatedAt,
+        },
+      })
+    );
 
     evaluated.push({
       id: bet.id,
@@ -1028,6 +1031,10 @@ export async function calculatePorraResults(
       breakdown: breakdownText,
       updatedAt: bet.updatedAt,
     });
+  }
+
+  if (dbUpdates.length > 0) {
+    await prisma.$transaction(dbUpdates);
   }
 
   // Ordenar clasificación del GP: más puntos primero, desempate por fecha de última modificación (updatedAt)
@@ -1162,6 +1169,7 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
     racesCount: number;
     gpWins: number;
     exactHits: number;
+    qualyHits: number;
     dnfHits: number;
   }
 
@@ -1176,6 +1184,7 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
       racesCount: 0,
       gpWins: gpWinnersCount.get(b.userJid) || 0,
       exactHits: 0,
+      qualyHits: 0,
       dnfHits: 0,
     };
 
@@ -1185,6 +1194,7 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
 
     const stats = extractBetStats(b.breakdown);
     current.exactHits += stats.exactHits;
+    current.qualyHits += stats.qualyHits;
     if (stats.dnfHit) {
       current.dnfHits += 1;
     }
@@ -1196,7 +1206,9 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
   const ranking = Array.from(userMap.values());
   ranking.sort((a, b) => {
     if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-    if (b.exactHits !== a.exactHits) return b.exactHits - a.exactHits;
+    if (b.exactHits + b.qualyHits !== a.exactHits + a.qualyHits) {
+      return b.exactHits + b.qualyHits - (a.exactHits + a.qualyHits);
+    }
     return b.gpWins - a.gpWins;
   });
 
@@ -1211,12 +1223,13 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
     const leaderCrown = i === 0 ? " 👑" : "";
 
     msg += `${prefix} *${u.userName}* — *${u.totalPoints} pts* (${u.racesCount} GP)${leaderCrown}\n` +
-      `   ↳ 🏆 ${u.gpWins} vic | 🎯 ${u.exactHits} plenos Top 5 | 💥 ${u.dnfHits} DNF\n`;
+      `   ↳ 🏆 ${u.gpWins} vic | 🎯 ${u.exactHits} plenos Top 5 | ⏱️ ${u.qualyHits} QP3 | 💥 ${u.dnfHits} DNF\n`;
   }
 
   // Cuadro de honor
   const topWinner = [...ranking].sort((a, b) => b.gpWins - a.gpWins)[0];
   const topNostradamus = [...ranking].sort((a, b) => b.exactHits - a.exactHits)[0];
+  const topQualyMaster = [...ranking].sort((a, b) => b.qualyHits - a.qualyHits)[0];
   const topDnfHunter = [...ranking].sort((a, b) => b.dnfHits - a.dnfHits)[0];
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -1226,7 +1239,10 @@ export async function showSeasonRanking(groupJid: string, sport: "f1" | "motogp"
     msg += `• 🏆 *Rey de Grandes Premios:* *${topWinner.userName}* (${topWinner.gpWins} victoria${topWinner.gpWins > 1 ? "s" : ""})\n`;
   }
   if (topNostradamus && topNostradamus.exactHits > 0) {
-    msg += `• 🎯 *El Nostradamus:* *${topNostradamus.userName}* (${topNostradamus.exactHits} posición${topNostradamus.exactHits > 1 ? "es exactas" : " exacta"})\n`;
+    msg += `• 🎯 *El Nostradamus:* *${topNostradamus.userName}* (${topNostradamus.exactHits} pleno${topNostradamus.exactHits > 1 ? "s Top 5" : " Top 5"})\n`;
+  }
+  if (topQualyMaster && topQualyMaster.qualyHits > 0) {
+    msg += `• ⏱️ *Rey de la Clasificación:* *${topQualyMaster.userName}* (${topQualyMaster.qualyHits} P3 Qualy exacto${topQualyMaster.qualyHits > 1 ? "s" : ""})\n`;
   }
   if (topDnfHunter && topDnfHunter.dnfHits > 0) {
     msg += `• 💥 *Cazador de Abandonos:* *${topDnfHunter.userName}* (${topDnfHunter.dnfHits} DNF acertado${topDnfHunter.dnfHits > 1 ? "s" : ""})\n`;
@@ -1332,6 +1348,7 @@ export async function showGPHistorial(groupJid: string, sport: "f1" | "motogp" =
 
       const stats = extractBetStats(b.breakdown);
       if (stats.exactHits > 0) msg += ` 🎯×${stats.exactHits}`;
+      if (stats.qualyHits > 0) msg += ` ⏱️`;
       if (stats.dnfHit) msg += ` 💥`;
       msg += `\n`;
     }

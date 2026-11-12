@@ -10,7 +10,9 @@ interface CacheEntry<T> {
 
 let nextRaceCache: CacheEntry<any> | null = null;
 let lastRaceCache: CacheEntry<any> | null = null;
-let lastQualyCache: CacheEntry<any> | null = null;
+const qualyCacheMap = new Map<string, CacheEntry<any>>();
+let driverStandingsCache: CacheEntry<string> | null = null;
+let constructorStandingsCache: CacheEntry<string> | null = null;
 
 export async function fetchNextF1RaceData(): Promise<any | null> {
   const now = Date.now();
@@ -40,8 +42,10 @@ export async function fetchLastF1RaceData(): Promise<any | null> {
 
 export async function fetchLastF1QualifyingData(season?: number, round?: number): Promise<any | null> {
   const now = Date.now();
-  if (!season && !round && lastQualyCache && lastQualyCache.expiresAt > now) {
-    return lastQualyCache.data;
+  const cacheKey = `${season || "current"}-${round || "last"}`;
+  const cached = qualyCacheMap.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
   }
   const endpoint = season && round
     ? `${JOLPICA_BASE}/${season}/${round}/qualifying.json`
@@ -49,8 +53,8 @@ export async function fetchLastF1QualifyingData(season?: number, round?: number)
   try {
     const res = await axios.get(endpoint, { timeout: 10000 });
     const race = res.data.MRData?.RaceTable?.Races?.[0] || null;
-    if (race && !season && !round) {
-      lastQualyCache = { data: race, expiresAt: now + CACHE_TTL_MS };
+    if (race) {
+      qualyCacheMap.set(cacheKey, { data: race, expiresAt: now + CACHE_TTL_MS });
     }
     return race;
   } catch (err: any) {
@@ -128,6 +132,11 @@ export async function getNextRace(): Promise<string> {
 
 export async function getDriverStandings(): Promise<string> {
   try {
+    const now = Date.now();
+    if (driverStandingsCache && driverStandingsCache.expiresAt > now) {
+      return driverStandingsCache.data;
+    }
+
     const res = await axios.get(`${JOLPICA_BASE}/current/driverStandings.json`, { timeout: 10000 });
     const standingsList = res.data.MRData?.StandingsTable?.StandingsLists?.[0];
 
@@ -151,6 +160,7 @@ export async function getDriverStandings(): Promise<string> {
 
     msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `💡 _Top 15 mostrado. Escribe *!f1 ayuda* para más comandos._`;
+    driverStandingsCache = { data: msg, expiresAt: now + CACHE_TTL_MS };
     return msg;
   } catch (err: any) {
     console.error("Error fetching driver standings:", err?.message);
@@ -160,6 +170,11 @@ export async function getDriverStandings(): Promise<string> {
 
 export async function getConstructorStandings(): Promise<string> {
   try {
+    const now = Date.now();
+    if (constructorStandingsCache && constructorStandingsCache.expiresAt > now) {
+      return constructorStandingsCache.data;
+    }
+
     const res = await axios.get(`${JOLPICA_BASE}/current/constructorStandings.json`, { timeout: 10000 });
     const standingsList = res.data.MRData?.StandingsTable?.StandingsLists?.[0];
 
@@ -181,6 +196,7 @@ export async function getConstructorStandings(): Promise<string> {
     });
 
     msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    constructorStandingsCache = { data: msg, expiresAt: now + CACHE_TTL_MS };
     return msg;
   } catch (err: any) {
     console.error("Error fetching constructor standings:", err?.message);

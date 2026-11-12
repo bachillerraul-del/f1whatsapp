@@ -30,7 +30,11 @@ export async function isSubscribed(jid: string) {
   return sub?.active ?? false;
 }
 
+const sentAlertsCache = new Set<string>();
+const chatActiveCache = new Map<string, boolean>();
+
 export async function markAlertSent(sessionKey: string) {
+  sentAlertsCache.add(sessionKey);
   return prisma.sentAlert.upsert({
     where: { sessionKey },
     update: { sentAt: new Date() },
@@ -39,9 +43,15 @@ export async function markAlertSent(sessionKey: string) {
 }
 
 export async function wasAlertSent(sessionKey: string) {
+  if (sentAlertsCache.has(sessionKey)) {
+    return true;
+  }
   const alert = await prisma.sentAlert.findUnique({
     where: { sessionKey },
   });
+  if (alert) {
+    sentAlertsCache.add(sessionKey);
+  }
   return !!alert;
 }
 
@@ -50,14 +60,20 @@ export async function wasAlertSent(sessionKey: string) {
 // =============================
 
 export async function isBotActiveInChat(jid: string): Promise<boolean> {
+  if (chatActiveCache.has(jid)) {
+    return chatActiveCache.get(jid)!;
+  }
   const settings = await prisma.chatSettings.findUnique({
     where: { jid },
   });
   // Por defecto el bot está activo si no hay registro
-  return settings?.botActive ?? true;
+  const active = settings?.botActive ?? true;
+  chatActiveCache.set(jid, active);
+  return active;
 }
 
 export async function setBotActiveInChat(jid: string, active: boolean) {
+  chatActiveCache.set(jid, active);
   return prisma.chatSettings.upsert({
     where: { jid },
     update: { botActive: active },

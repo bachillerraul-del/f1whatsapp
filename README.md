@@ -46,18 +46,17 @@ Juego interactivo para grupos de WhatsApp donde cada participante pronostica el 
 - 🤖 **Competidores IA (Jarvis AI & Pitwall AI):** Dos inteligencias artificiales que juegan en la porra del grupo formulando estrategias con **Google Gemini AI**:
   - **🤖 Jarvis AI:** Estratega analítico de telemetría (probabilidades y ritmo de tandas).
   - **🤖 Pitwall AI:** Jefe de muro audaz (apuestas arriesgadas, sorpresas en el Top 5 y DNF).
-- 🖼️ **Tarjeta gráfica del Podio:** Al publicarse los resultados de la carrera, el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones (distinguiendo F1 y MotoGP con estilos propios).
-- 📢 **Publicación automática de resultados:** Nada más finalizar la carrera el domingo, el bot calcula los puntos y publica automáticamente el podio y desglose en cada grupo.
+- 🖼️ **Tarjeta gráfica del Podio:** Al calcular los resultados de la carrera (`!porra puntos`), el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones (distinguiendo F1 y MotoGP con estilos propios).
 - 🏎️ / 🏍️ **Feedback visual:** El bot reacciona con el emoji 🏎️ (F1) o 🏍️ (MotoGP) al mensaje de WhatsApp cuando registras un pronóstico válido.
 - 🚫 **Reglas Anti-Copia (solo aplican a Carrera: Top 5 + DNF):**
   1. **Máximo 3 coincidencias exactas en el Top 5:** No puedes coincidir en más de 3 posiciones exactas del Top 5 de carrera con otro jugador humano. Si coincide en 4 o 5 posiciones del Top 5, la apuesta es rechazada.
   2. **Prohibido coincidir en la predicción DNF:** Ningún jugador puede repetir el piloto DNF que ya haya elegido otro participante del grupo.
   - _Nota:_ En la predicción de **P3 de Clasificación (`QP3`)** no se aplica regla anti-copia, y las IAs nunca bloquean las apuestas de los usuarios humanos.
-- 🎖️ **Palmarés y Cuadro de Honor (`!porra tabla` / `!porra moto tabla`):** La clasificación general por puntos totales incluye estadísticas avanzadas:
-  - 🏆 **Victorias de GP:** Carreras ganadas por cada participante.
-  - 🎯 **El Nostradamus:** Total de posiciones exactas acertadas (+3).
+- 🎖️ **Palmarés y Cuadro de Honor (`!porra tabla` / `!porramoto tabla`):** La clasificación general por puntos totales incluye estadísticas avanzadas:
+  - 🏆 **Rey de Grandes Premios:** Carreras ganadas por cada participante.
+  - 🎯 **El Nostradamus:** Total de posiciones exactas acertadas en el Top 5 (+3).
+  - ⏱️ **Rey de la Clasificación:** Total de aciertos exactos de P3 en Clasificación (`QP3`, +3).
   - 💥 **Cazador de Abandonos:** Total de aciertos de DNF (+3).
-  - ⏱️ **Pole Master:** Total de aciertos de P3 de Clasificación (+3).
   - 👑 **Cuadro de Honor:** Premios y títulos honoríficos para los mejores de la temporada.
 
 ### 🔔 Sistema de Alertas Automáticas (2 Avisos por GP)
