@@ -32,7 +32,7 @@ import {
   setBotActiveInChat,
   prisma,
 } from "./db.js";
-import { setupAlerts } from "./alerts.js";
+import { setupAlerts, runAlertsCycle } from "./alerts.js";
 import { pushSessionToDb, schedulePushSessionToDb, clearSessionCache } from "./session-sync.js";
 import { handlePorraCommand, showSeasonRanking } from "./porra.js";
 
@@ -103,11 +103,10 @@ const GENERAL_HELP_MESSAGE = `🏁 *MOTORSPORT BOT - GUÍA DE COMANDOS* 🏁\n` 
   `🔹 *!porra ia* : Pronósticos de las IAs / auditar apuesta\n` +
   `🔹 *!porra reglas* : Puntuación y normas\n` +
   `_(Para MotoGP usa *!porramoto* o *!porra moto*)_\n\n` +
-  `🔔 *ALERTAS Y AJUSTES*\n` +
-  `🔹 *!alertas on* / *off* : Activar/desactivar los 2 avisos automáticos (24h antes de FP1 y 2h antes del cierre de apuestas)\n` +
-  `🔹 *!bot on* / *off* : Activar o silenciar el bot en este chat\n` +
+  `🔔 *CONTROL DEL BOT*\n` +
+  `🔹 *!bot on* / *off* : Activar o silenciar el bot y sus avisos automáticos en este chat\n` +
   `━━━━━━━━━━━━━━━━━━━━━\n` +
-  `💡 _Escribe *!ayuda* cuando quieras ver este menú._`;
+  `💡 _Las alertas (24h antes de FP1, 2h antes de Qualy y resultados tras la carrera) llegan automáticamente mientras el bot esté activo._`;
 
 function extractText(msg: WAMessage): string {
   const m = msg.message;
@@ -132,32 +131,22 @@ function extractText(msg: WAMessage): string {
 async function handleAlertSubscriptionCommand(
   sock: WASocket,
   remoteJid: string,
-  pushName: string,
+  _pushName: string,
   subCommand: string
 ) {
-  if (subCommand === "on" || subCommand === "activar" || subCommand === "suscribir") {
-    await addSubscriber(remoteJid, pushName);
+  if (subCommand === "off" || subCommand === "desactivar" || subCommand === "desuscribir" || subCommand === "cancelar") {
+    await setBotActiveInChat(remoteJid, false);
     await sock.sendMessage(remoteJid, {
-      text: `✅ *¡Alertas automáticas activadas!* 🎉\n\n` +
-        `Recibirás únicamente *2 avisos por Gran Premio* (F1 y MotoGP):\n` +
-        `1️⃣ *24h antes de la 1ª sesión (FP1)* con todos los horarios del fin de semana.\n` +
-        `2️⃣ *2h antes del cierre de apuestas (Qualy)* con los pronósticos de las IAs.\n\n` +
-        `Puedes desactivarlas cuando quieras con *!alertas off*.`,
-    });
-  } else if (subCommand === "off" || subCommand === "desactivar" || subCommand === "desuscribir" || subCommand === "cancelar") {
-    await removeSubscriber(remoteJid);
-    await sock.sendMessage(remoteJid, {
-      text: `🔕 *Alertas automáticas desactivadas.*\nYa no recibirás avisos automáticos en este chat. Usa *!alertas on* si deseas reactivarlas.`,
+      text: `🔴 *Bot y alertas desactivados en este chat.*\nPara volver a activarlos cuando quieras, escribe *!bot on*.`,
     });
   } else {
-    const subscribed = await isSubscribed(remoteJid);
-    const statusText = subscribed
-      ? `🟢 *Activas* (Recibirás los 2 avisos de cada GP: 24h antes de FP1 y 2h antes del cierre de apuestas).`
-      : `🔴 *Inactivas* (No estás suscrito a los avisos automáticos).`;
+    await setBotActiveInChat(remoteJid, true);
     await sock.sendMessage(remoteJid, {
-      text: `🔔 *Estado de Alertas Automáticas:*\n${statusText}\n\n` +
-        `🔹 *!alertas on* — Activar alertas\n` +
-        `🔹 *!alertas off* — Desactivar alertas`,
+      text: `🟢 *¡Alertas automáticas activas!* 🎉\n\n` +
+        `Ya *no es necesario suscribirse*: mientras el bot esté activo en este chat (*!bot on*), recibirás automáticamente:\n` +
+        `1️⃣ *24h antes de la 1ª sesión (FP1)* con todos los horarios del GP.\n` +
+        `2️⃣ *2h antes del cierre de apuestas (Qualy)* con los pronósticos de las IAs.\n` +
+        `3️⃣ *Resultados de la jornada y Clasificación General* tras cada carrera.`,
     });
   }
 }

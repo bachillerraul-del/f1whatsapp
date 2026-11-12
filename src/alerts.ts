@@ -1,10 +1,10 @@
 import cron from "node-cron";
 import {
   prisma,
-  getActiveSubscribers,
   wasAlertSent,
   markAlertSent,
   isBotActiveInChat,
+  getAllKnownActiveChatJids,
 } from "./db.js";
 import { getNextRace, fetchNextF1RaceData, fetchLastF1RaceData } from "./f1.js";
 import {
@@ -12,25 +12,27 @@ import {
   getNextMotoGPEventInfo,
   getLastMotoGPResultsData,
 } from "./motogp.js";
-import { ensureAIParticipants, AI_PARTICIPANTS } from "./ai-participants.js";
+import { ensureAIParticipants } from "./ai-participants.js";
 import { calculatePorraResults, showSeasonRanking } from "./porra.js";
 import type { WASocket } from "@whiskeysockets/baileys";
 
 let activeSock: WASocket | null = null;
 let alertsCronTask: cron.ScheduledTask | null = null;
+let isRunningCycle = false;
 
-async function broadcastAlert(sock: WASocket, message: string) {
-  const subscribers = await getActiveSubscribers();
-  for (const sub of subscribers) {
-    try {
-      // Respetar la configuración de bot activo/inactivo por chat
-      const active = await isBotActiveInChat(sub.jid);
-      if (!active) continue;
-      await sock.sendMessage(sub.jid, { text: message });
-    } catch (e: any) {
-      console.error(`Error enviando alerta a ${sub.jid}:`, e?.message);
-    }
+/**
+ * Obtiene todos los chats y grupos donde el bot está activo (por defecto todos,
+ * salvo aquellos donde se haya ejecutado explícitamente !bot off), sin necesidad de suscripción.
+ */
+async function getActiveTargetChats(sock: WASocket): Promise<string[]> {
+  let groupJids: string[] = [];
+  try {
+    const groups = await sock.groupFetchAllParticipating();
+    groupJids = Object.keys(groups || {});
+  } catch {
+    // Si falla la consulta de grupos en vivo, usamos los registrados en BD
   }
+  return getAllKnownActiveChatJids(groupJids);
 }
 
 /**
@@ -74,40 +76,21 @@ async function checkAndPublishAvailablePorraResults(
       },
       select: {
         groupJid: true,
-        userJid: true,
         points: true,
       },
     });
 
     if (betsForRound.length === 0) return;
 
-    const aiIds = new Set([AI_PARTICIPANTS.jarvis.id, AI_PARTICIPANTS.pitwall.id]);
-
     // Agrupar por chat/grupo
-    const groupsMap = new Map<
-      string,
-      { hasPendingPoints: boolean; hasHumanBets: boolean }
-    >();
-
+    const groupsWithPendingPoints = new Set<string>();
     for (const b of betsForRound) {
-      const entry = groupsMap.get(b.groupJid) || {
-        hasPendingPoints: false,
-        hasHumanBets: false,
-      };
-      if (b.points === null) entry.hasPendingPoints = true;
-      if (!aiIds.has(b.userJid)) entry.hasHumanBets = true;
-      groupsMap.set(b.groupJid, entry);
+      if (b.points === null) {
+        groupsWithPendingPoints.add(b.groupJid);
+      }
     }
 
-    const activeSubscribers = await getActiveSubscribers();
-    const subscriberJids = new Set(activeSubscribers.map((s) => s.jid));
-
-    for (const [groupJid, info] of groupsMap.entries()) {
-      // Solo publicar automáticamente si aún había apuestas sin evaluar (points === null)
-      // y el grupo tiene apuestas humanas o está suscrito a alertas
-      if (!info.hasPendingPoints) continue;
-      if (!info.hasHumanBets && !subscriberJids.has(groupJid)) continue;
-
+    for (const groupJid of groupsWithPendingPoints) {
       const alertKey = `porra-auto-results-${sport}-${season}-${round}-${groupJid}`;
       if (await wasAlertSent(alertKey)) continue;
 
@@ -143,19 +126,14 @@ async function checkAndPublishAvailablePorraResults(
   }
 }
 
-export function setupAlerts(sock: WASocket) {
-  activeSock = sock;
+export async function runAlertsCycle() {
+  const currentSock = activeSock;
+  if (!currentSock || isRunningCycle) return;
+  isRunningCycle = true;
 
-  if (alertsCronTask) {
-    console.log("🔄 Socket de alertas actualizado (tarea cron ya activa).");
-    return;
-  }
-
-  // Comprobar cada 15 minutos las ventanas de 24h (FP1), 2h (cierre Qualy) y resultados post-carrera
-  alertsCronTask = cron.schedule("*/15 * * * *", async () => {
-    const currentSock = activeSock;
-    if (!currentSock) return;
+  try {
     const now = new Date();
+    const targetChats = await getActiveTargetChats(currentSock);
 
     // =========================================================
     // 🏎️ 1. ALERTAS DE FÓRMULA 1
@@ -163,22 +141,41 @@ export function setupAlerts(sock: WASocket) {
     try {
       const race = await fetchNextF1RaceData();
 
-      if (race) {
+      if (race && targetChats.length > 0) {
         // --- ALERTA 1: 24 horas antes de la primera sesión (FP1) con horarios completos ---
+        // (Incluye ventana de recuperación hasta el inicio de FP1 por si el bot estuvo apagado o recién activado)
         if (race.FirstPractice?.date) {
           const fp1Time = race.FirstPractice.time || "12:00:00Z";
           const fp1Date = new Date(`${race.FirstPractice.date}T${fp1Time}`);
           const diffMinutes = Math.round((fp1Date.getTime() - now.getTime()) / (1000 * 60));
 
-          // Ventana de 24 horas (entre 23h y 25h antes)
-          if (diffMinutes >= 1380 && diffMinutes <= 1500) {
-            const alertKey = `f1-${race.season}-${race.round}-24h-fp1`;
-            if (!(await wasAlertSent(alertKey))) {
-              console.log(`🚀 [Alerta 1 F1] 24h antes de FP1 para ${race.raceName}`);
-              const schedulePreview = await getNextRace();
-              const message = `🚨 *¡EL GRAN PREMIO DE F1 COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
-              await broadcastAlert(currentSock, message);
-              await markAlertSent(alertKey);
+          if (diffMinutes > 0 && diffMinutes <= 1500) {
+            let schedulePreview: string | null = null;
+            const header =
+              diffMinutes >= 1260
+                ? `🚨 *¡EL GRAN PREMIO DE F1 COMIENZA EN 24 HORAS!* 🚨`
+                : `🚨 *¡HORARIOS OFICIALES DEL GRAN PREMIO DE F1!* 🚨`;
+
+            for (const jid of targetChats) {
+              const chatAlertKey = `f1-${race.season}-${race.round}-24h-fp1-${jid}`;
+              if (await wasAlertSent(chatAlertKey)) continue;
+
+              const active = await isBotActiveInChat(jid);
+              if (!active) continue;
+
+              if (!schedulePreview) {
+                schedulePreview = await getNextRace();
+              }
+
+              try {
+                console.log(`🚀 [Alerta 1 F1] Enviando horarios de ${race.raceName} a ${jid}`);
+                await currentSock.sendMessage(jid, {
+                  text: `${header}\n\n${schedulePreview}`,
+                });
+                await markAlertSent(chatAlertKey);
+              } catch (e: any) {
+                console.error(`Error enviando Alerta 1 F1 a ${jid}:`, e?.message);
+              }
             }
           }
         }
@@ -189,44 +186,50 @@ export function setupAlerts(sock: WASocket) {
           const qualyDate = new Date(`${race.Qualifying.date}T${qualyTime}`);
           const diffMinutes = Math.round((qualyDate.getTime() - now.getTime()) / (1000 * 60));
 
-          // Ventana de 2 horas (entre 1h45m y 2h15m)
-          if (diffMinutes >= 105 && diffMinutes <= 135) {
-            const alertKey = `f1-${race.season}-${race.round}-2h-qualy-porra`;
-            if (!(await wasAlertSent(alertKey))) {
-              console.log(`🚀 [Alerta 2 F1] 2h antes del cierre de apuestas para ${race.raceName}`);
+          // Ventana de 2 horas (hasta 5 min antes de Qualy por si hubo reinicio)
+          if (diffMinutes >= 5 && diffMinutes <= 135) {
+            const season = parseInt(race.season, 10);
+            const round = parseInt(race.round, 10);
+            const raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
 
-              const season = parseInt(race.season, 10);
-              const round = parseInt(race.round, 10);
-              const raceDateStr = race.date ? `${race.date}T${race.time || "12:00:00Z"}` : undefined;
+            for (const jid of targetChats) {
+              const chatAlertKey = `f1-${race.season}-${race.round}-2h-qualy-${jid}`;
+              if (await wasAlertSent(chatAlertKey)) continue;
 
-              const subscribers = await getActiveSubscribers();
-              let aiSummary = "";
+              const active = await isBotActiveInChat(jid);
+              if (!active) continue;
 
-              for (const sub of subscribers) {
+              try {
+                console.log(`🚀 [Alerta 2 F1] Enviando aviso de cierre de apuestas de ${race.raceName} a ${jid}`);
+                let aiSummary = "";
                 try {
-                  const aiRes = await ensureAIParticipants("f1", sub.jid, season, round, race.raceName, {
+                  const aiRes = await ensureAIParticipants("f1", jid, season, round, race.raceName, {
                     force: true,
                     raceDateStr,
                   });
-                  if (!aiSummary && aiRes.text) {
-                    aiSummary = aiRes.text;
-                  }
+                  aiSummary = aiRes.text || "";
                 } catch {
                   // omit
                 }
-              }
 
-              const message = `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (F1)!* 🚨\n` +
-                `━━━━━━━━━━━━━━━━━━━━━\n` +
-                `🏎️ *${race.raceName}*\n` +
-                `⏱️ La Clasificación (Qualy) comienza en 2 horas.\n\n` +
-                (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos libres.\n\n`) +
-                `👉 ¡Última oportunidad para enviar o modificar tu apuesta!\n` +
-                `Usa: *!porra [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
-                `_Ejemplo: !porra ver nor lec pia rus dnf: col qp3: alo_\n\n` +
-                `📊 Consulta las apuestas del grupo con *!porra ver*. 🏁`;
-              await broadcastAlert(currentSock, message);
-              await markAlertSent(alertKey);
+                const message =
+                  `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (F1)!* 🚨\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `🏎️ *${race.raceName}*\n` +
+                  `⏱️ La Clasificación (Qualy) está a punto de comenzar.\n\n` +
+                  (aiSummary
+                    ? `${aiSummary}\n\n`
+                    : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos libres.\n\n`) +
+                  `👉 ¡Última oportunidad para enviar o modificar tu apuesta!\n` +
+                  `Usa: *!porra [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
+                  `_Ejemplo: !porra ver nor lec pia rus dnf: col qp3: alo_\n\n` +
+                  `📊 Consulta las apuestas del grupo con *!porra ver*. 🏁`;
+
+                await currentSock.sendMessage(jid, { text: message });
+                await markAlertSent(chatAlertKey);
+              } catch (e: any) {
+                console.error(`Error enviando Alerta 2 F1 a ${jid}:`, e?.message);
+              }
             }
           }
         }
@@ -241,19 +244,38 @@ export function setupAlerts(sock: WASocket) {
     try {
       const motoInfo = await getNextMotoGPEventInfo();
 
-      if (motoInfo) {
+      if (motoInfo && targetChats.length > 0) {
         // --- ALERTA 1 (MotoGP): 24h antes de la primera sesión (FP1) con horarios completos ---
         if (motoInfo.fp1Date) {
           const diffMinutes = Math.round((motoInfo.fp1Date.getTime() - now.getTime()) / (1000 * 60));
 
-          if (diffMinutes >= 1380 && diffMinutes <= 1500) {
-            const alertKey = `motogp-${motoInfo.eventId}-24h-fp1`;
-            if (!(await wasAlertSent(alertKey))) {
-              console.log(`🚀 [Alerta 1 MotoGP] 24h antes de la primera sesión para ${motoInfo.raceName}`);
-              const schedulePreview = await getNextMotoGP();
-              const message = `🚨 *¡EL GRAN PREMIO DE MOTOGP COMIENZA EN 24 HORAS!* 🚨\n\n${schedulePreview}`;
-              await broadcastAlert(currentSock, message);
-              await markAlertSent(alertKey);
+          if (diffMinutes > 0 && diffMinutes <= 1500) {
+            let schedulePreview: string | null = null;
+            const header =
+              diffMinutes >= 1260
+                ? `🚨 *¡EL GRAN PREMIO DE MOTOGP COMIENZA EN 24 HORAS!* 🚨`
+                : `🚨 *¡HORARIOS OFICIALES DEL GRAN PREMIO DE MOTOGP!* 🚨`;
+
+            for (const jid of targetChats) {
+              const chatAlertKey = `motogp-${motoInfo.eventId}-24h-fp1-${jid}`;
+              if (await wasAlertSent(chatAlertKey)) continue;
+
+              const active = await isBotActiveInChat(jid);
+              if (!active) continue;
+
+              if (!schedulePreview) {
+                schedulePreview = await getNextMotoGP();
+              }
+
+              try {
+                console.log(`🚀 [Alerta 1 MotoGP] Enviando horarios de ${motoInfo.raceName} a ${jid}`);
+                await currentSock.sendMessage(jid, {
+                  text: `${header}\n\n${schedulePreview}`,
+                });
+                await markAlertSent(chatAlertKey);
+              } catch (e: any) {
+                console.error(`Error enviando Alerta 1 MotoGP a ${jid}:`, e?.message);
+              }
             }
           }
         }
@@ -262,21 +284,23 @@ export function setupAlerts(sock: WASocket) {
         if (motoInfo.qualyDate) {
           const diffMinutes = Math.round((motoInfo.qualyDate.getTime() - now.getTime()) / (1000 * 60));
 
-          if (diffMinutes >= 105 && diffMinutes <= 135) {
-            const alertKey = `motogp-${motoInfo.eventId}-2h-qualy-porra`;
-            if (!(await wasAlertSent(alertKey))) {
-              const raceDateStr = motoInfo.raceDate ? motoInfo.raceDate.toISOString() : undefined;
+          if (diffMinutes >= 5 && diffMinutes <= 135) {
+            const raceDateStr = motoInfo.raceDate ? motoInfo.raceDate.toISOString() : undefined;
 
-              console.log(`🚀 [Alerta 2 MotoGP] 2h antes del cierre de apuestas para ${motoInfo.raceName}`);
+            for (const jid of targetChats) {
+              const chatAlertKey = `motogp-${motoInfo.eventId}-2h-qualy-${jid}`;
+              if (await wasAlertSent(chatAlertKey)) continue;
 
-              const subscribers = await getActiveSubscribers();
-              let aiSummary = "";
+              const active = await isBotActiveInChat(jid);
+              if (!active) continue;
 
-              for (const sub of subscribers) {
+              try {
+                console.log(`🚀 [Alerta 2 MotoGP] Enviando aviso de cierre de apuestas de ${motoInfo.raceName} a ${jid}`);
+                let aiSummary = "";
                 try {
                   const aiRes = await ensureAIParticipants(
                     "motogp",
-                    sub.jid,
+                    jid,
                     motoInfo.season,
                     motoInfo.round,
                     motoInfo.raceName,
@@ -285,25 +309,29 @@ export function setupAlerts(sock: WASocket) {
                       raceDateStr,
                     }
                   );
-                  if (!aiSummary && aiRes.text) {
-                    aiSummary = aiRes.text;
-                  }
+                  aiSummary = aiRes.text || "";
                 } catch {
                   // omit
                 }
-              }
 
-              const message = `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (MOTOGP)!* 🚨\n` +
-                `━━━━━━━━━━━━━━━━━━━━━\n` +
-                `🏍️ *${motoInfo.raceName}*\n` +
-                `⏱️ La Clasificación (Q1) comienza en 2 horas.\n\n` +
-                (aiSummary ? `${aiSummary}\n\n` : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos.\n\n`) +
-                `👉 ¡Última oportunidad para enviar o modificar tu apuesta de MotoGP!\n` +
-                `Usa: *!porramoto [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
-                `_Ejemplo: !porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales_\n\n` +
-                `📊 Consulta las apuestas del grupo con *!porramoto ver*. 🏁`;
-              await broadcastAlert(currentSock, message);
-              await markAlertSent(alertKey);
+                const message =
+                  `⏰ *¡QUEDAN 2 HORAS PARA EL CIERRE DE APUESTAS (MOTOGP)!* 🚨\n` +
+                  `━━━━━━━━━━━━━━━━━━━━━\n` +
+                  `🏍️ *${motoInfo.raceName}*\n` +
+                  `⏱️ La Clasificación (Q1) está a punto de comenzar.\n\n` +
+                  (aiSummary
+                    ? `${aiSummary}\n\n`
+                    : `🤖 *Jarvis AI* y *Pitwall AI* ya han registrado sus pronósticos tras analizar los entrenamientos.\n\n`) +
+                  `👉 ¡Última oportunidad para enviar o modificar tu apuesta de MotoGP!\n` +
+                  `Usa: *!porramoto [1º] [2º] [3º] [4º] [5º] [DNF] [QP3]*\n` +
+                  `_Ejemplo: !porramoto marquez martin bagnaia acosta bastianini dnf: binder qp3: vinales_\n\n` +
+                  `📊 Consulta las apuestas del grupo con *!porramoto ver*. 🏁`;
+
+                await currentSock.sendMessage(jid, { text: message });
+                await markAlertSent(chatAlertKey);
+              } catch (e: any) {
+                console.error(`Error enviando Alerta 2 MotoGP a ${jid}:`, e?.message);
+              }
             }
           }
         }
@@ -317,10 +345,35 @@ export function setupAlerts(sock: WASocket) {
     // =========================================================
     await checkAndPublishAvailablePorraResults(currentSock, "f1");
     await checkAndPublishAvailablePorraResults(currentSock, "motogp");
+  } finally {
+    isRunningCycle = false;
+  }
+}
+
+export function setupAlerts(sock: WASocket) {
+  activeSock = sock;
+
+  // Ejecutar una comprobación inmediata al conectar por si hay alguna alerta en ventana pendiente
+  setTimeout(() => {
+    runAlertsCycle().catch((err) => {
+      console.error("Error en comprobación inicial de alertas:", err?.message);
+    });
+  }, 4000);
+
+  if (alertsCronTask) {
+    console.log("🔄 Socket de alertas actualizado (tarea cron ya activa).");
+    return;
+  }
+
+  // Comprobar cada 15 minutos las ventanas de 24h (FP1), 2h (cierre Qualy) y resultados post-carrera
+  alertsCronTask = cron.schedule("*/15 * * * *", () => {
+    runAlertsCycle().catch((err) => {
+      console.error("Error en ciclo de alertas:", err?.message);
+    });
   });
 
   console.log(
-    "✅ Sistema de alertas configurado (24h antes de FP1, 2h antes de Qualy y resultados automáticos post-carrera)."
+    "✅ Sistema de alertas automáticas activo para todos los chats con el bot encendido (!bot on)."
   );
 }
 

@@ -60,8 +60,8 @@ Juego interactivo para grupos de WhatsApp donde cada participante pronostica el 
   - 💥 **Cazador de Abandonos:** Total de aciertos de DNF (+3).
   - 👑 **Cuadro de Honor:** Premios y títulos honoríficos para los mejores de la temporada.
 
-### 🔔 Sistema de Alertas y Publicaciones Automáticas
-El bot gestiona automáticamente el ciclo de cada Gran Premio (F1 y MotoGP):
+### 🔔 Sistema de Alertas y Publicaciones Automáticas (Sin Suscripción)
+Las alertas llegan **automáticamente a todos los chats y grupos donde el bot esté activo (`!bot on`, activo por defecto)** sin necesidad de suscribirse:
 1. ⏰ **24 horas antes de la 1ª sesión (FP1):** Aviso de inicio del Gran Premio con el circuito y los horarios completos de todas las sesiones del fin de semana (hora peninsular española).
 2. 🚨 **2 horas antes del cierre de apuestas (Clasificación / Qualy):** Recordatorio final antes de que se cierren las apuestas de La Porra, incluyendo las predicciones oficiales de **Jarvis AI** y **Pitwall AI**.
 3. 🏁 **Tras finalizar la carrera (Resultados disponibles):** Publicación automática en los grupos participantes de los **Resultados de la Jornada (con imagen del podio)** seguida inmediatamente de la **Clasificación General acumulada**.
@@ -84,13 +84,12 @@ El bot gestiona automáticamente el ciclo de cada Gran Premio (F1 y MotoGP):
 | `!porra [1º..5º] [DNF] [QP3]` | Porra F1 | Enviar o modificar pronóstico (ej. `!porra ver nor lec pia rus dnf: col qp3: alo`) |
 | `!porramoto [1º..5º] [DNF] [QP3]`| Porra MotoGP| Enviar o modificar pronóstico de MotoGP (ej. `!porramoto mar mar bag aco bas dnf: bin qp3: qua`) |
 | `!porra ver` | Porra | Ver las apuestas registradas del grupo y de las IAs |
-| `!porra puntos` | Porra | Calcula puntos del último GP, genera podio PNG y radio de equipo |
+| `!porra puntos` | Porra | Calcula puntos del último GP, genera podio PNG y muestra la tabla general |
 | `!porra tabla` | Porra | Clasificación general de la temporada (suma total de puntos) |
 | `!porra historial` | Porra | Resumen de todos los GPs disputados en la temporada |
 | `!porra ia` / `analizar` | Porra | Ver pronósticos de las IAs o auditar tu apuesta con telemetría |
 | `!porra reglas` | Porra | Explica el sistema de puntuación (3-2-1) y normas |
-| `!alertas on` / `off` | Alertas | Activa o desactiva las 2 alertas automáticas en el chat |
-| `!bot on` / `off` | Control | Activa o silencia el bot en el chat actual |
+| `!bot on` / `off` | Control | Activa o silencia el bot y sus alertas automáticas en el chat actual |
 
 ---
 

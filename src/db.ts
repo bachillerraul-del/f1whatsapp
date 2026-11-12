@@ -69,6 +69,18 @@ export async function isBotActiveInChat(jid: string): Promise<boolean> {
   // Por defecto el bot está activo si no hay registro
   const active = settings?.botActive ?? true;
   chatActiveCache.set(jid, active);
+
+  // Registrar el chat en segundo plano si aún no existía en ChatSettings
+  if (!settings) {
+    prisma.chatSettings
+      .upsert({
+        where: { jid },
+        update: {},
+        create: { jid, botActive: true },
+      })
+      .catch(() => {});
+  }
+
   return active;
 }
 
@@ -79,6 +91,47 @@ export async function setBotActiveInChat(jid: string, active: boolean) {
     update: { botActive: active },
     create: { jid, botActive: active },
   });
+}
+
+/**
+ * Obtiene todos los JIDs de chats/grupos conocidos en la base de datos
+ * (ChatSettings, PorraBet y Subscriber) donde el bot no esté desactivado (!bot off).
+ */
+export async function getAllKnownActiveChatJids(extraJids: string[] = []): Promise<string[]> {
+  const [settings, subscribers, betGroups] = await Promise.all([
+    prisma.chatSettings.findMany({ select: { jid: true, botActive: true } }),
+    prisma.subscriber.findMany({ select: { jid: true } }),
+    prisma.porraBet.findMany({ select: { groupJid: true }, distinct: ["groupJid"] }),
+  ]);
+
+  const disabledSet = new Set<string>();
+  const allCandidates = new Set<string>(extraJids);
+
+  for (const s of settings) {
+    chatActiveCache.set(s.jid, s.botActive);
+    if (!s.botActive) {
+      disabledSet.add(s.jid);
+    } else {
+      allCandidates.add(s.jid);
+    }
+  }
+
+  for (const sub of subscribers) {
+    if (!disabledSet.has(sub.jid)) {
+      allCandidates.add(sub.jid);
+    }
+  }
+
+  for (const bg of betGroups) {
+    if (!disabledSet.has(bg.groupJid)) {
+      allCandidates.add(bg.groupJid);
+    }
+  }
+
+  // Filtrar chats inválidos o de broadcast de estado
+  return Array.from(allCandidates).filter(
+    (jid) => jid && jid !== "status@broadcast" && !disabledSet.has(jid)
+  );
 }
 
 export async function getActiveChats(): Promise<string[]> {
