@@ -294,14 +294,15 @@ export async function startBot() {
           } else if (subCommand === "on" || subCommand === "activar") {
             await setBotActiveInChat(remoteJid, true);
             await sock.sendMessage(remoteJid, {
-              text: `🟢 *¡Bot activado en este chat!*\n\nVuelvo a estar operativo. 🏎️🏍️\nEscribe *!ayuda* para ver los comandos disponibles.`,
+              text: `🟢 *¡Bot y alertas automáticas activados en este chat!*\n\nYa estoy operativo aquí. 🏎️🏍️\nEscribe *!ayuda* para ver los comandos disponibles.`,
             });
+            runAlertsCycle().catch(() => {});
           } else {
             const active = await isBotActiveInChat(remoteJid);
             await sock.sendMessage(remoteJid, {
               text: `🤖 *Estado del bot en este chat:* ${active ? "🟢 Activado" : "🔴 Desactivado"}\n\n` +
-                `🔹 *!bot on* — Activar el bot\n` +
-                `🔹 *!bot off* — Desactivar el bot`,
+                `🔹 *!bot on* — Activar el bot y alertas en este chat\n` +
+                `🔹 *!bot off* — Desactivar el bot y alertas en este chat`,
             });
           }
           continue;

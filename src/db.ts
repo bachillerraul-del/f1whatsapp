@@ -59,32 +59,93 @@ export async function wasAlertSent(sessionKey: string) {
 // Chat Settings (bot on/off)
 // =============================
 
+let migrationCompleted = false;
+
+/**
+ * Limpia por única vez cualquier grupo personal que se haya registrado automáticamente
+ * en ChatSettings sin haber tenido nunca actividad en PorraBet ni en Subscriber,
+ * y asegura que los chats legítimos (con apuestas o suscripción previa) estén en ChatSettings.
+ */
+export async function ensureAuthorizedChatsMigrated(): Promise<void> {
+  if (migrationCompleted) return;
+  try {
+    const migrationKey = "system-cleanup-chatsettings-v1";
+    if (await wasAlertSent(migrationKey)) {
+      migrationCompleted = true;
+      return;
+    }
+
+    const [settings, subscribers, betGroups] = await Promise.all([
+      prisma.chatSettings.findMany({ select: { jid: true, botActive: true } }),
+      prisma.subscriber.findMany({ select: { jid: true } }),
+      prisma.porraBet.findMany({ select: { groupJid: true }, distinct: ["groupJid"] }),
+    ]);
+
+    const legitimateJids = new Set<string>();
+    for (const sub of subscribers) {
+      if (sub.jid && sub.jid !== "status@broadcast") legitimateJids.add(sub.jid);
+    }
+    for (const bg of betGroups) {
+      if (bg.groupJid && bg.groupJid !== "status@broadcast") legitimateJids.add(bg.groupJid);
+    }
+
+    const existingSettingsMap = new Map<string, boolean>();
+    const spuriousJidsToDelete: string[] = [];
+
+    for (const s of settings) {
+      existingSettingsMap.set(s.jid, s.botActive);
+      // Si estaba marcado como activo pero nunca tuvo apuestas ni suscripción, fue auto-insertado por error
+      if (s.botActive && !legitimateJids.has(s.jid)) {
+        spuriousJidsToDelete.push(s.jid);
+      }
+    }
+
+    if (spuriousJidsToDelete.length > 0) {
+      await prisma.chatSettings.deleteMany({
+        where: { jid: { in: spuriousJidsToDelete } },
+      });
+      console.log(
+        `🧹 [Limpieza ChatSettings] Eliminados ${spuriousJidsToDelete.length} grupos donde nunca se activó el bot.`
+      );
+    }
+
+    // Asegurar que los grupos legítimos (con porra o suscripción previa) tengan registro en ChatSettings
+    for (const jid of legitimateJids) {
+      if (!existingSettingsMap.has(jid)) {
+        await prisma.chatSettings.upsert({
+          where: { jid },
+          update: {},
+          create: { jid, botActive: true },
+        });
+      }
+    }
+
+    chatActiveCache.clear();
+    await markAlertSent(migrationKey);
+    migrationCompleted = true;
+  } catch (err: any) {
+    console.error("[Migración ChatSettings Error]:", err?.message);
+  }
+}
+
 export async function isBotActiveInChat(jid: string): Promise<boolean> {
+  await ensureAuthorizedChatsMigrated();
+
   if (chatActiveCache.has(jid)) {
     return chatActiveCache.get(jid)!;
   }
   const settings = await prisma.chatSettings.findUnique({
     where: { jid },
   });
-  // Por defecto el bot está activo si no hay registro
-  const active = settings?.botActive ?? true;
+  // Por defecto el bot está DESACTIVADO en chats donde nunca se ha activado con !bot on
+  const active = settings?.botActive ?? false;
   chatActiveCache.set(jid, active);
-
-  // Registrar el chat en segundo plano si aún no existía en ChatSettings
-  if (!settings) {
-    prisma.chatSettings
-      .upsert({
-        where: { jid },
-        update: {},
-        create: { jid, botActive: true },
-      })
-      .catch(() => {});
-  }
 
   return active;
 }
 
 export async function setBotActiveInChat(jid: string, active: boolean) {
+  await ensureAuthorizedChatsMigrated();
   chatActiveCache.set(jid, active);
   return prisma.chatSettings.upsert({
     where: { jid },
@@ -94,51 +155,27 @@ export async function setBotActiveInChat(jid: string, active: boolean) {
 }
 
 /**
- * Obtiene todos los JIDs de chats/grupos conocidos en la base de datos
- * (ChatSettings, PorraBet y Subscriber) donde el bot no esté desactivado (!bot off).
+ * Obtiene únicamente los JIDs de chats/grupos donde el bot ha sido activado (!bot on)
+ * o tiene actividad legítima registrada y botActive === true.
  */
-export async function getAllKnownActiveChatJids(extraJids: string[] = []): Promise<string[]> {
-  const [settings, subscribers, betGroups] = await Promise.all([
-    prisma.chatSettings.findMany({ select: { jid: true, botActive: true } }),
-    prisma.subscriber.findMany({ select: { jid: true } }),
-    prisma.porraBet.findMany({ select: { groupJid: true }, distinct: ["groupJid"] }),
-  ]);
+export async function getAllKnownActiveChatJids(): Promise<string[]> {
+  await ensureAuthorizedChatsMigrated();
 
-  const disabledSet = new Set<string>();
-  const allCandidates = new Set<string>(extraJids);
+  const activeSettings = await prisma.chatSettings.findMany({
+    where: { botActive: true },
+    select: { jid: true },
+  });
 
-  for (const s of settings) {
-    chatActiveCache.set(s.jid, s.botActive);
-    if (!s.botActive) {
-      disabledSet.add(s.jid);
-    } else {
-      allCandidates.add(s.jid);
-    }
+  for (const s of activeSettings) {
+    chatActiveCache.set(s.jid, true);
   }
 
-  for (const sub of subscribers) {
-    if (!disabledSet.has(sub.jid)) {
-      allCandidates.add(sub.jid);
-    }
-  }
-
-  for (const bg of betGroups) {
-    if (!disabledSet.has(bg.groupJid)) {
-      allCandidates.add(bg.groupJid);
-    }
-  }
-
-  // Filtrar chats inválidos o de broadcast de estado
-  return Array.from(allCandidates).filter(
-    (jid) => jid && jid !== "status@broadcast" && !disabledSet.has(jid)
-  );
+  return activeSettings
+    .map((s) => s.jid)
+    .filter((jid) => Boolean(jid && jid !== "status@broadcast"));
 }
 
 export async function getActiveChats(): Promise<string[]> {
-  // Devuelve los JIDs donde el bot está explícitamente desactivado
-  const disabled = await prisma.chatSettings.findMany({
-    where: { botActive: false },
-    select: { jid: true },
-  });
-  return disabled.map((c) => c.jid);
+  // Devuelve los JIDs donde el bot está explícitamente activado
+  return getAllKnownActiveChatJids();
 }

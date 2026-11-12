@@ -21,18 +21,11 @@ let alertsCronTask: cron.ScheduledTask | null = null;
 let isRunningCycle = false;
 
 /**
- * Obtiene todos los chats y grupos donde el bot está activo (por defecto todos,
- * salvo aquellos donde se haya ejecutado explícitamente !bot off), sin necesidad de suscripción.
+ * Obtiene únicamente los chats y grupos donde el bot ha sido activado (!bot on)
+ * o tiene actividad legítima en la Porra, sin escanear grupos personales ajenos.
  */
-async function getActiveTargetChats(sock: WASocket): Promise<string[]> {
-  let groupJids: string[] = [];
-  try {
-    const groups = await sock.groupFetchAllParticipating();
-    groupJids = Object.keys(groups || {});
-  } catch {
-    // Si falla la consulta de grupos en vivo, usamos los registrados en BD
-  }
-  return getAllKnownActiveChatJids(groupJids);
+async function getActiveTargetChats(): Promise<string[]> {
+  return getAllKnownActiveChatJids();
 }
 
 /**
@@ -133,7 +126,7 @@ export async function runAlertsCycle() {
 
   try {
     const now = new Date();
-    const targetChats = await getActiveTargetChats(currentSock);
+    const targetChats = await getActiveTargetChats();
 
     // =========================================================
     // 🏎️ 1. ALERTAS DE FÓRMULA 1
