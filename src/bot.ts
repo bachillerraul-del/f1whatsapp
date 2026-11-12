@@ -34,7 +34,7 @@ import {
 } from "./db.js";
 import { setupAlerts } from "./alerts.js";
 import { pushSessionToDb, schedulePushSessionToDb, clearSessionCache } from "./session-sync.js";
-import { handlePorraCommand } from "./porra.js";
+import { handlePorraCommand, showSeasonRanking } from "./porra.js";
 
 export let currentQr: string | null = null;
 export let isBotConnected: boolean = false;
@@ -363,6 +363,13 @@ export async function startBot() {
               });
             } else {
               await sock.sendMessage(remoteJid, { text: response.text });
+            }
+
+            // Si se acaban de calcular resultados válidos, mostrar a continuación la Clasificación General
+            if (response.text.includes("RESULTADOS OFICIALES")) {
+              const isMoto = defaultSport === "motogp" || /^!porra\s+moto/i.test(cleanText);
+              const rankingMsg = await showSeasonRanking(remoteJid, isMoto ? "motogp" : "f1");
+              await sock.sendMessage(remoteJid, { text: rankingMsg });
             }
           }
           continue;

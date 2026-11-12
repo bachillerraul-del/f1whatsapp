@@ -46,7 +46,8 @@ Juego interactivo para grupos de WhatsApp donde cada participante pronostica el 
 - 🤖 **Competidores IA (Jarvis AI & Pitwall AI):** Dos inteligencias artificiales que juegan en la porra del grupo formulando estrategias con **Google Gemini AI**:
   - **🤖 Jarvis AI:** Estratega analítico de telemetría (probabilidades y ritmo de tandas).
   - **🤖 Pitwall AI:** Jefe de muro audaz (apuestas arriesgadas, sorpresas en el Top 5 y DNF).
-- 🖼️ **Tarjeta gráfica del Podio:** Al calcular los resultados de la carrera (`!porra puntos`), el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones (distinguiendo F1 y MotoGP con estilos propios).
+- 🖼️ **Tarjeta gráfica del Podio:** Al publicarse o calcularse los resultados de la carrera, el bot genera y envía una **imagen digital del podio** con los 3 mejores jugadores y sus puntuaciones (distinguiendo F1 y MotoGP con estilos propios).
+- 📢 **Publicación automática de resultados + Clasificación General:** En cuanto las APIs oficiales publican los resultados de la carrera, el bot calcula los puntos automáticamente, envía al grupo los **resultados de la jornada con el podio gráfico** y, acto seguido, publica la **Clasificación General actualizada**.
 - 🏎️ / 🏍️ **Feedback visual:** El bot reacciona con el emoji 🏎️ (F1) o 🏍️ (MotoGP) al mensaje de WhatsApp cuando registras un pronóstico válido.
 - 🚫 **Reglas Anti-Copia (solo aplican a Carrera: Top 5 + DNF):**
   1. **Máximo 3 coincidencias exactas en el Top 5:** No puedes coincidir en más de 3 posiciones exactas del Top 5 de carrera con otro jugador humano. Si coincide en 4 o 5 posiciones del Top 5, la apuesta es rechazada.
@@ -59,10 +60,11 @@ Juego interactivo para grupos de WhatsApp donde cada participante pronostica el 
   - 💥 **Cazador de Abandonos:** Total de aciertos de DNF (+3).
   - 👑 **Cuadro de Honor:** Premios y títulos honoríficos para los mejores de la temporada.
 
-### 🔔 Sistema de Alertas Automáticas (2 Avisos por GP)
-El bot envía **únicamente 2 alertas automáticas** por cada fin de semana de Gran Premio (F1 y MotoGP):
+### 🔔 Sistema de Alertas y Publicaciones Automáticas
+El bot gestiona automáticamente el ciclo de cada Gran Premio (F1 y MotoGP):
 1. ⏰ **24 horas antes de la 1ª sesión (FP1):** Aviso de inicio del Gran Premio con el circuito y los horarios completos de todas las sesiones del fin de semana (hora peninsular española).
 2. 🚨 **2 horas antes del cierre de apuestas (Clasificación / Qualy):** Recordatorio final antes de que se cierren las apuestas de La Porra, incluyendo las predicciones oficiales de **Jarvis AI** y **Pitwall AI**.
+3. 🏁 **Tras finalizar la carrera (Resultados disponibles):** Publicación automática en los grupos participantes de los **Resultados de la Jornada (con imagen del podio)** seguida inmediatamente de la **Clasificación General acumulada**.
 
 ---
 
